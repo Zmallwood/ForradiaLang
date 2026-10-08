@@ -18,7 +18,7 @@ Class WorldView
 
         Const Double kSmallValue = 0.001
 
-        Int gridSize = 11
+        Const Int gridSize = 17
 
         For y = 0 To gridSize - 1
             For x = 0 To gridSize - 1
