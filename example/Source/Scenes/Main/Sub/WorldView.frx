@@ -18,10 +18,12 @@ Class WorldView
 
         Const Double kSmallValue = 0.001
 
-        For y = 0 To 10
-            For x = 0 To 10
-                Int xCoordinate = playerPosition.x - 5 + x
-                Int yCoordinate = playerPosition.y - 5 + y
+        Int gridSize = 11
+
+        For y = 0 To gridSize - 1
+            For x = 0 To gridSize - 1
+                Int xCoordinate = playerPosition.x - (gridSize - 1)/2 + x
+                Int yCoordinate = playerPosition.y - (gridSize - 1)/2 + y
 
                 If Not worldArea.IsValidCoordinate(xCoordinate, yCoordinate) Then
                     Continue
@@ -36,9 +38,13 @@ Class WorldView
                 String groundType = tile.groundType
 
                 Double xPx = 0.5 - tileWidth/2 + x*tileWidth/2 - y*tileWidth/2
-                Double yPx = 0.5 - 5.5*tileHeight + x*tileHeight/2 + y*tileHeight/2
+                Double yPx = 0.5 - gridSize/2.0*tileHeight + x*tileHeight/2 + y*tileHeight/2
                 Double widthPx = tileWidth + kSmallValue
                 Double heightPx = tileHeight + kSmallValue
+
+                If xPx + widthPx < 0.0 Or yPx + heightPx < 0.0 Or xPx > 1.0 Or yPx > 1.0 Then
+                    Continue
+                End
                 
                 If Not groundType == String.Empty Then
 
@@ -51,7 +57,7 @@ Class WorldView
                     DrawImage groundType, xPx, yPx, widthPx, heightPx
                 End
 
-                If x == 5 And y == 5 Then
+                If x == (gridSize - 1)/2 And y == (gridSize - 1)/2 Then
                     DrawImage "Player", xPx, yPx - heightPx/2, widthPx, heightPx
                 End
             Next
