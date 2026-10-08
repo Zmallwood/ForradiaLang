@@ -7,6 +7,10 @@ namespace ForradiaLang
     class SceneDeclaration : public Statement
     {
       public:
+        SceneDeclaration() : Statement(StatementKind::Scene)
+        {
+        }
+
         std::string name;
         std::vector<std::unique_ptr<Statement>> update;
         std::vector<std::unique_ptr<Statement>> draw;

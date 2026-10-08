@@ -8,6 +8,10 @@ namespace ForradiaLang
     class ForStatement : public Statement
     {
       public:
+        ForStatement() : Statement(StatementKind::For)
+        {
+        }
+
         std::string name;
         std::unique_ptr<Expression> start;
         std::unique_ptr<Expression> end;

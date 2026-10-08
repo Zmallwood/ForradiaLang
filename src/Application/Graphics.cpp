@@ -14,12 +14,15 @@ namespace ForradiaLang
     {
         SDL_Window *window = nullptr;
         SDL_Renderer *renderer = nullptr;
+        int cachedCanvasWidth = 0;
+        int cachedCanvasHeight = 0;
         Uint8 clearRed = 0;
         Uint8 clearGreen = 0;
         Uint8 clearBlue = 0;
         Uint8 clearAlpha = 255;
         bool imageSupportReady = false;
         bool textSupportReady = false;
+        bool systemCursorHidden = false;
         std::string imagesDirectory;
         std::string fontFile;
         struct CursorStyle
@@ -146,6 +149,32 @@ namespace ForradiaLang
             }
 
             SDL_RenderPresent(renderer);
+        }
+
+        bool RefreshCanvasSize()
+        {
+            if (renderer == nullptr)
+            {
+                cachedCanvasWidth = 0;
+                cachedCanvasHeight = 0;
+                return false;
+            }
+
+            int canvasWidth = 0;
+            int canvasHeight = 0;
+
+            if (SDL_GetRendererOutputSize(renderer, &canvasWidth,
+                                          &canvasHeight) != 0 ||
+                canvasWidth <= 0 || canvasHeight <= 0)
+            {
+                cachedCanvasWidth = 0;
+                cachedCanvasHeight = 0;
+                return false;
+            }
+
+            cachedCanvasWidth = canvasWidth;
+            cachedCanvasHeight = canvasHeight;
+            return true;
         }
 
         void DestroyImages()
@@ -489,6 +518,11 @@ namespace ForradiaLang
 
         void HideSystemCursor()
         {
+            if (systemCursorHidden)
+            {
+                return;
+            }
+
             EnsureBlankCursors();
             InstallSystemCursorHook();
 
@@ -508,13 +542,21 @@ namespace ForradiaLang
                 SetCursor(blankWinCursor);
             }
 #endif
+
+            systemCursorHidden = true;
         }
 
         void ShowSystemCursor()
         {
+            if (!systemCursorHidden)
+            {
+                return;
+            }
+
             UnhookSystemCursor();
             SDL_SetCursor(SDL_GetDefaultCursor());
             SDL_ShowCursor(SDL_ENABLE);
+            systemCursorHidden = false;
         }
 
         void DestroyBlankCursors()
@@ -685,6 +727,9 @@ namespace ForradiaLang
             UnhookSystemCursor();
             ReleaseCursorConfine();
             DestroyImages();
+            systemCursorHidden = false;
+            cachedCanvasWidth = 0;
+            cachedCanvasHeight = 0;
 
             if (renderer != nullptr)
             {
@@ -773,14 +818,22 @@ namespace ForradiaLang
             throw std::runtime_error("Could not create window.");
         }
 
-        renderer =
-            SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
+        renderer = SDL_CreateRenderer(window, -1,
+                                      SDL_RENDERER_ACCELERATED |
+                                          SDL_RENDERER_PRESENTVSYNC);
+
+        if (renderer == nullptr)
+        {
+            renderer =
+                SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
+        }
 
         if (renderer == nullptr)
         {
             renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_SOFTWARE);
         }
 
+        RefreshCanvasSize();
         ClearBackground();
         Present();
 
@@ -1001,20 +1054,16 @@ namespace ForradiaLang
 
         int textWidth = 0;
         int textHeight = 0;
-        int canvasWidth = 0;
-        int canvasHeight = 0;
 
         if (SDL_QueryTexture(texture, nullptr, nullptr, &textWidth,
                              &textHeight) != 0 ||
-            SDL_GetRendererOutputSize(renderer, &canvasWidth, &canvasHeight) !=
-                0 ||
-            canvasWidth <= 0 || canvasHeight <= 0)
+            !RefreshCanvasSize())
         {
             throw std::runtime_error("Could not draw string.");
         }
 
-        const double anchorX = x * canvasWidth;
-        const double anchorY = y * canvasHeight;
+        const double anchorX = x * cachedCanvasWidth;
+        const double anchorY = y * cachedCanvasHeight;
         SDL_Rect destination;
         destination.w = textWidth;
         destination.h = textHeight;
@@ -1047,21 +1096,18 @@ namespace ForradiaLang
         }
 
         SDL_Texture *texture = ImageTexture(name);
-        int canvasWidth = 0;
-        int canvasHeight = 0;
 
-        if (SDL_GetRendererOutputSize(renderer, &canvasWidth, &canvasHeight) !=
-                0 ||
-            canvasWidth <= 0 || canvasHeight <= 0)
+        if ((cachedCanvasWidth <= 0 || cachedCanvasHeight <= 0) &&
+            !RefreshCanvasSize())
         {
             throw std::runtime_error("Could not draw image.");
         }
 
         SDL_Rect destination;
-        destination.x = static_cast<int>(x * canvasWidth);
-        destination.y = static_cast<int>(y * canvasHeight);
-        destination.w = static_cast<int>(width * canvasWidth);
-        destination.h = static_cast<int>(height * canvasHeight);
+        destination.x = static_cast<int>(x * cachedCanvasWidth);
+        destination.y = static_cast<int>(y * cachedCanvasHeight);
+        destination.w = static_cast<int>(width * cachedCanvasWidth);
+        destination.h = static_cast<int>(height * cachedCanvasHeight);
 
         if (SDL_RenderCopy(renderer, texture, nullptr, &destination) != 0)
         {
@@ -1076,18 +1122,14 @@ namespace ForradiaLang
             throw std::runtime_error("Could not convert width to height.");
         }
 
-        int canvasWidth = 0;
-        int canvasHeight = 0;
-
-        if (SDL_GetRendererOutputSize(renderer, &canvasWidth, &canvasHeight) !=
-                0 ||
-            canvasWidth <= 0 || canvasHeight <= 0)
+        if ((cachedCanvasWidth <= 0 || cachedCanvasHeight <= 0) &&
+            !RefreshCanvasSize())
         {
             throw std::runtime_error("Could not convert width to height.");
         }
 
-        return width * static_cast<double>(canvasWidth) /
-               static_cast<double>(canvasHeight);
+        return width * static_cast<double>(cachedCanvasWidth) /
+               static_cast<double>(cachedCanvasHeight);
     }
 
     void Graphics::RunUntilClosed(const std::function<void()> &update,
@@ -1105,6 +1147,7 @@ namespace ForradiaLang
 
         while (running)
         {
+            const Uint32 frameStart = SDL_GetTicks();
             SDL_Event event;
 
             while (SDL_PollEvent(&event))
@@ -1162,6 +1205,7 @@ namespace ForradiaLang
                 update();
             }
 
+            RefreshCanvasSize();
             ClearBackground();
 
             if (draw)
@@ -1175,7 +1219,12 @@ namespace ForradiaLang
 
             Present();
 
-            SDL_Delay(16);
+            const Uint32 frameTime = SDL_GetTicks() - frameStart;
+
+            if (frameTime < 16)
+            {
+                SDL_Delay(16 - frameTime);
+            }
         }
     }
 

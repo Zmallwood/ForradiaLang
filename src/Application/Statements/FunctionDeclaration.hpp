@@ -13,6 +13,10 @@ namespace ForradiaLang
     class FunctionDeclaration : public Statement
     {
       public:
+        FunctionDeclaration() : Statement(StatementKind::Function)
+        {
+        }
+
         std::string name;
         std::string returnType;
         std::vector<Parameter> parameters;

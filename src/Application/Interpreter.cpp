@@ -3,6 +3,7 @@
 #include <cmath>
 #include <optional>
 #include <random>
+#include <string_view>
 #include <unordered_set>
 
 #include "Coloring.hpp"
@@ -56,7 +57,6 @@ namespace ForradiaLang
 
         struct Object
         {
-            std::string className;
             int id{0};
         };
 
@@ -73,6 +73,7 @@ namespace ForradiaLang
             std::unordered_map<std::string, const FunctionDeclaration *>
                 methods;
             std::vector<FieldInfo> fields;
+            std::unordered_map<std::string, bool> fieldConstant;
             const std::vector<std::unique_ptr<Statement>> *constructor{nullptr};
         };
 
@@ -106,6 +107,13 @@ namespace ForradiaLang
                                    SceneObject, std::vector<double>, Point, Size,
                                    GroupRef, ListRef, Null>;
 
+        enum class ControlFlow
+        {
+            None,
+            Continue,
+            Return
+        };
+
         struct ListData
         {
             std::string elementType;
@@ -133,10 +141,27 @@ namespace ForradiaLang
             int nextObjectId{1};
             int nextListId{1};
             int currentObjectId{0};
+            ControlFlow controlFlow{ControlFlow::None};
+            Value returnValue{Null{}};
+            std::vector<std::vector<Value>> argumentFrames;
+            std::size_t argumentDepth{0};
             std::unordered_map<int, std::unordered_map<std::string, Value>>
                 objectFields;
             std::unordered_map<int, ListData> lists;
         };
+
+        const std::string &ObjectClassName(const ExecutionState &state,
+                                           const Object &object)
+        {
+            const auto found = state.objectClasses.find(object.id);
+
+            if (found == state.objectClasses.end())
+            {
+                throw std::runtime_error("Unknown object.");
+            }
+
+            return found->second;
+        }
 
         double AsNumber(const Value &value)
         {
@@ -346,8 +371,7 @@ namespace ForradiaLang
                     if (classInfo != state.classes.end() &&
                         classInfo->second.methods.contains(name))
                     {
-                        const Object instance{className->second,
-                                              state.currentObjectId};
+                        const Object instance{state.currentObjectId};
                         const std::optional<Value> returned = CallObjectMethod(
                             state, instance, name, {});
 
@@ -366,9 +390,11 @@ namespace ForradiaLang
 
         Value Evaluate(ExecutionState &state, const Expression &expression);
 
-        std::vector<Value> EvaluateArguments(
+        std::vector<Value> &PushArguments(
             ExecutionState &state,
             const std::vector<std::unique_ptr<Expression>> &arguments);
+
+        void PopArguments(ExecutionState &state);
 
         Value EvaluateField(ExecutionState &state, const FieldInfo &field);
 
@@ -394,7 +420,7 @@ namespace ForradiaLang
 
             const std::vector<FieldInfo> fieldInfos = classInfo->second.fields;
             const auto *constructor = classInfo->second.constructor;
-            Object instance{className, state.nextObjectId++};
+            Object instance{state.nextObjectId++};
             state.objectClasses[instance.id] = className;
             const int previousObject = state.currentObjectId;
             const std::string previousGroup = state.currentGroup;
@@ -453,17 +479,13 @@ namespace ForradiaLang
                         AsNumber(Evaluate(state, *arguments[1]))};
         }
 
-        struct ContinueSignal
-        {
-        };
-
-        struct ReturnSignal
-        {
-            Value value;
-        };
-
         void ExecuteStatement(ExecutionState &state,
                               const Statement &statement);
+
+        bool HasControlFlow(const ExecutionState &state)
+        {
+            return state.controlFlow != ControlFlow::None;
+        }
 
         Value EvaluateBinary(ExecutionState &state,
                              const BinaryExpression &expression)
@@ -685,11 +707,23 @@ namespace ForradiaLang
                     if (classInfo != state.classes.end() &&
                         classInfo->second.methods.contains(expression.name))
                     {
-                        const Object instance{className->second,
-                                              state.currentObjectId};
-                        const std::optional<Value> returned = CallObjectMethod(
-                            state, instance, expression.name,
-                            EvaluateArguments(state, expression.arguments));
+                        const Object instance{state.currentObjectId};
+                        const std::vector<Value> &arguments =
+                            PushArguments(state, expression.arguments);
+                        std::optional<Value> returned;
+
+                        try
+                        {
+                            returned = CallObjectMethod(
+                                state, instance, expression.name, arguments);
+                        }
+                        catch (...)
+                        {
+                            PopArguments(state);
+                            throw;
+                        }
+
+                        PopArguments(state);
 
                         if (!returned.has_value())
                         {
@@ -770,11 +804,23 @@ namespace ForradiaLang
             throw std::runtime_error("Unknown member.");
         }
 
-        std::vector<Value> EvaluateArguments(
+        std::vector<Value> &PushArguments(
             ExecutionState &state,
             const std::vector<std::unique_ptr<Expression>> &arguments)
         {
-            std::vector<Value> values;
+            if (state.argumentFrames.empty())
+            {
+                state.argumentFrames.resize(64);
+            }
+
+            if (state.argumentDepth >= state.argumentFrames.size())
+            {
+                throw std::runtime_error("Call stack too deep.");
+            }
+
+            std::vector<Value> &values =
+                state.argumentFrames[state.argumentDepth++];
+            values.clear();
             values.reserve(arguments.size());
 
             for (const auto &argument : arguments)
@@ -785,19 +831,32 @@ namespace ForradiaLang
             return values;
         }
 
+        void PopArguments(ExecutionState &state)
+        {
+            if (state.argumentDepth == 0)
+            {
+                throw std::runtime_error("Unexpected arguments.");
+            }
+
+            --state.argumentDepth;
+            state.argumentFrames[state.argumentDepth].clear();
+        }
+
         Value EvaluateMember(ExecutionState &state,
                              const MemberExpression &expression)
         {
-            if (const auto *variable = dynamic_cast<const VariableExpression *>(
-                    expression.object.get()))
+            if (expression.object->kind == ExpressionKind::Variable)
             {
-                if (state.groups.contains(variable->name))
+                const auto &variable =
+                    static_cast<const VariableExpression &>(*expression.object);
+
+                if (state.groups.contains(variable.name))
                 {
-                    return LookupGroupMember(state, variable->name,
+                    return LookupGroupMember(state, variable.name,
                                              expression.memberName);
                 }
 
-                if (variable->name == "MouseButtons")
+                if (variable.name == "MouseButtons")
                 {
                     if (expression.memberName == "Left")
                     {
@@ -812,7 +871,7 @@ namespace ForradiaLang
                     throw std::runtime_error("Unknown member.");
                 }
 
-                if (variable->name == "Keys" &&
+                if (variable.name == "Keys" &&
                     expression.memberName.size() == 1)
                 {
                     const char letter = expression.memberName[0];
@@ -825,7 +884,7 @@ namespace ForradiaLang
                     throw std::runtime_error("Unknown member.");
                 }
 
-                if (variable->name == "String")
+                if (variable.name == "String")
                 {
                     if (expression.memberName == "Empty")
                     {
@@ -913,8 +972,8 @@ namespace ForradiaLang
                         }
                     }
 
-                    const auto classInfo =
-                        state.classes.find(instance->className);
+                    const auto classInfo = state.classes.find(
+                        ObjectClassName(state, *instance));
 
                     if (classInfo == state.classes.end() ||
                         !classInfo->second.methods.contains(
@@ -924,9 +983,23 @@ namespace ForradiaLang
                     }
                 }
 
-                const std::optional<Value> returned = CallObjectMethod(
-                    state, *instance, expression.memberName,
-                    EvaluateArguments(state, expression.arguments));
+                const std::vector<Value> &arguments =
+                    PushArguments(state, expression.arguments);
+                std::optional<Value> returned;
+
+                try
+                {
+                    returned = CallObjectMethod(state, *instance,
+                                                expression.memberName,
+                                                arguments);
+                }
+                catch (...)
+                {
+                    PopArguments(state);
+                    throw;
+                }
+
+                PopArguments(state);
 
                 if (!returned.has_value())
                 {
@@ -951,71 +1024,54 @@ namespace ForradiaLang
 
         Value Evaluate(ExecutionState &state, const Expression &expression)
         {
-            if (const auto *number =
-                    dynamic_cast<const NumberExpression *>(&expression))
+            switch (expression.kind)
             {
-                return number->value;
-            }
+            case ExpressionKind::Number:
+                return static_cast<const NumberExpression &>(expression).value;
+            case ExpressionKind::String:
+                return static_cast<const StringExpression &>(expression).value;
+            case ExpressionKind::Variable:
+                return LookupName(
+                    state,
+                    static_cast<const VariableExpression &>(expression).name);
+            case ExpressionKind::Binary:
+                return EvaluateBinary(
+                    state, static_cast<const BinaryExpression &>(expression));
+            case ExpressionKind::Unary:
+            {
+                const auto &unary =
+                    static_cast<const UnaryExpression &>(expression);
 
-            if (const auto *text =
-                    dynamic_cast<const StringExpression *>(&expression))
-            {
-                return text->value;
-            }
-
-            if (const auto *variable =
-                    dynamic_cast<const VariableExpression *>(&expression))
-            {
-                return LookupName(state, variable->name);
-            }
-
-            if (const auto *binary =
-                    dynamic_cast<const BinaryExpression *>(&expression))
-            {
-                return EvaluateBinary(state, *binary);
-            }
-
-            if (const auto *unary =
-                    dynamic_cast<const UnaryExpression *>(&expression))
-            {
-                if (unary->operation == '!')
+                if (unary.operation == '!')
                 {
-                    return IsTrue(Evaluate(state, *unary->operand)) ? 0.0
-                                                                    : 1.0;
+                    return IsTrue(Evaluate(state, *unary.operand)) ? 0.0 : 1.0;
                 }
 
                 throw std::runtime_error("Unknown operation.");
             }
-
-            if (const auto *call =
-                    dynamic_cast<const CallExpression *>(&expression))
+            case ExpressionKind::Call:
+                return EvaluateCall(
+                    state, static_cast<const CallExpression &>(expression));
+            case ExpressionKind::Member:
+                return EvaluateMember(
+                    state, static_cast<const MemberExpression &>(expression));
+            case ExpressionKind::Index:
+                return EvaluateIndex(
+                    state, static_cast<const IndexExpression &>(expression));
+            case ExpressionKind::List:
             {
-                return EvaluateCall(state, *call);
-            }
-
-            if (const auto *member =
-                    dynamic_cast<const MemberExpression *>(&expression))
-            {
-                return EvaluateMember(state, *member);
-            }
-
-            if (const auto *index =
-                    dynamic_cast<const IndexExpression *>(&expression))
-            {
-                return EvaluateIndex(state, *index);
-            }
-
-            if (const auto *list =
-                    dynamic_cast<const ListExpression *>(&expression))
-            {
+                const auto &list =
+                    static_cast<const ListExpression &>(expression);
                 std::vector<double> values;
+                values.reserve(list.elements.size());
 
-                for (const auto &element : list->elements)
+                for (const auto &element : list.elements)
                 {
                     values.push_back(AsNumber(Evaluate(state, *element)));
                 }
 
                 return values;
+            }
             }
 
             throw std::runtime_error("Unknown expression.");
@@ -1313,18 +1369,18 @@ namespace ForradiaLang
         }
 
         void ExpectElement(ExecutionState &state, const Value &value,
-                           const std::string &typeName)
+                           std::string_view typeName)
         {
-            std::string effective = typeName;
+            std::string_view effective = typeName;
 
-            if (IsNullable(effective))
+            if (!effective.empty() && effective.back() == '?')
             {
                 if (std::holds_alternative<Null>(value))
                 {
                     return;
                 }
 
-                effective.pop_back();
+                effective.remove_suffix(1);
             }
 
             if (effective == "Int" || effective == "Double" ||
@@ -1400,7 +1456,8 @@ namespace ForradiaLang
 
             const auto *instance = std::get_if<Object>(&value);
 
-            if (instance == nullptr || instance->className != effective)
+            if (instance == nullptr ||
+                ObjectClassName(state, *instance) != effective)
             {
                 throw std::runtime_error("Expected an object.");
             }
@@ -1571,7 +1628,8 @@ namespace ForradiaLang
 
             const auto *instance = std::get_if<Object>(&value);
 
-            if (instance == nullptr || instance->className != field.typeName)
+            if (instance == nullptr ||
+                ObjectClassName(state, *instance) != field.typeName)
             {
                 throw std::runtime_error("Expected an object.");
             }
@@ -1586,6 +1644,11 @@ namespace ForradiaLang
             for (const auto &statement : statements)
             {
                 ExecuteStatement(state, *statement);
+
+                if (HasControlFlow(state))
+                {
+                    return;
+                }
             }
         }
 
@@ -1605,6 +1668,8 @@ namespace ForradiaLang
             {
                 throw std::runtime_error("Unexpected arguments.");
             }
+
+            saved.reserve(arguments.size());
 
             for (std::size_t index = 0; index < arguments.size(); ++index)
             {
@@ -1630,7 +1695,7 @@ namespace ForradiaLang
                 if (found != state.variables.end())
                 {
                     savedVariable.existed = true;
-                    savedVariable.value = found->second;
+                    savedVariable.value = std::move(found->second);
                 }
 
                 state.variables[name] = arguments[index];
@@ -1658,7 +1723,8 @@ namespace ForradiaLang
             ExecutionState &state, const Object &instance,
             const std::string &methodName, const std::vector<Value> &arguments)
         {
-            const auto classInfo = state.classes.find(instance.className);
+            const auto classInfo =
+                state.classes.find(ObjectClassName(state, instance));
 
             if (classInfo == state.classes.end())
             {
@@ -1678,24 +1744,24 @@ namespace ForradiaLang
             state.currentObjectId = instance.id;
             state.currentGroup.clear();
             std::vector<SavedVariable> saved;
+            std::optional<Value> result;
 
             try
             {
                 BindParameters(state, *function, arguments, saved);
                 ExecuteBlock(state, function->body);
-            }
-            catch (const ReturnSignal &returned)
-            {
-                RestoreParameters(state, saved);
-                state.currentObjectId = previousObject;
-                state.currentGroup = previousGroup;
 
-                if (!function->returnType.empty())
+                if (state.controlFlow == ControlFlow::Return)
                 {
-                    ExpectElement(state, returned.value, function->returnType);
-                }
+                    result = std::move(state.returnValue);
+                    state.controlFlow = ControlFlow::None;
+                    state.returnValue = Null{};
 
-                return returned.value;
+                    if (!function->returnType.empty())
+                    {
+                        ExpectElement(state, *result, function->returnType);
+                    }
+                }
             }
             catch (...)
             {
@@ -1708,7 +1774,7 @@ namespace ForradiaLang
             RestoreParameters(state, saved);
             state.currentObjectId = previousObject;
             state.currentGroup = previousGroup;
-            return std::nullopt;
+            return result;
         }
 
         struct Slot
@@ -1728,15 +1794,14 @@ namespace ForradiaLang
                 return false;
             }
 
-            for (const auto &field : info->second.fields)
+            const auto field = info->second.fieldConstant.find(fieldName);
+
+            if (field == info->second.fieldConstant.end())
             {
-                if (field.name == fieldName)
-                {
-                    return field.isConstant;
-                }
+                return false;
             }
 
-            return false;
+            return field->second;
         }
 
         Slot FindBinding(ExecutionState &state, const std::string &name)
@@ -1796,26 +1861,29 @@ namespace ForradiaLang
         std::string GroupName(const ExecutionState &state,
                               const Expression &expression)
         {
-            if (const auto *variable =
-                    dynamic_cast<const VariableExpression *>(&expression))
+            if (expression.kind == ExpressionKind::Variable)
             {
-                if (state.groups.contains(variable->name))
+                const auto &variable =
+                    static_cast<const VariableExpression &>(expression);
+
+                if (state.groups.contains(variable.name))
                 {
-                    return variable->name;
+                    return variable.name;
                 }
 
                 return {};
             }
 
-            if (const auto *member =
-                    dynamic_cast<const MemberExpression *>(&expression))
+            if (expression.kind == ExpressionKind::Member)
             {
-                const std::string parent = GroupName(state, *member->object);
+                const auto &member =
+                    static_cast<const MemberExpression &>(expression);
+                const std::string parent = GroupName(state, *member.object);
 
                 if (!parent.empty())
                 {
                     const std::string nested =
-                        parent + "." + member->memberName;
+                        parent + "." + member.memberName;
 
                     if (state.groups.contains(nested))
                     {
@@ -1853,23 +1921,25 @@ namespace ForradiaLang
 
         Slot ResolveSlot(ExecutionState &state, const Expression &expression)
         {
-            if (const auto *variable =
-                    dynamic_cast<const VariableExpression *>(&expression))
+            if (expression.kind == ExpressionKind::Variable)
             {
-                return FindBinding(state, variable->name);
+                return FindBinding(
+                    state,
+                    static_cast<const VariableExpression &>(expression).name);
             }
 
-            if (const auto *member =
-                    dynamic_cast<const MemberExpression *>(&expression))
+            if (expression.kind == ExpressionKind::Member)
             {
-                const std::string group = GroupName(state, *member->object);
+                const auto &member =
+                    static_cast<const MemberExpression &>(expression);
+                const std::string group = GroupName(state, *member.object);
 
                 if (!group.empty())
                 {
-                    return GroupMemberSlot(state, group, member->memberName);
+                    return GroupMemberSlot(state, group, member.memberName);
                 }
 
-                const Slot parent = ResolveSlot(state, *member->object);
+                const Slot parent = ResolveSlot(state, *member.object);
 
                 if (parent.value == nullptr)
                 {
@@ -1890,7 +1960,7 @@ namespace ForradiaLang
                     return {};
                 }
 
-                const auto field = fields->second.find(member->memberName);
+                const auto field = fields->second.find(member.memberName);
 
                 if (field == fields->second.end())
                 {
@@ -1899,8 +1969,8 @@ namespace ForradiaLang
 
                 const bool isConstant =
                     parent.isConstant ||
-                    FieldIsConstant(state, instance->className,
-                                    member->memberName);
+                    FieldIsConstant(state, ObjectClassName(state, *instance),
+                                    member.memberName);
 
                 return Slot{&field->second, isConstant};
             }
@@ -1919,10 +1989,11 @@ namespace ForradiaLang
         void AssignTo(ExecutionState &state, const Expression &target,
                       Value value)
         {
-            if (const auto *variable =
-                    dynamic_cast<const VariableExpression *>(&target))
+            if (target.kind == ExpressionKind::Variable)
             {
-                const Slot slot = FindBinding(state, variable->name);
+                const auto &variable =
+                    static_cast<const VariableExpression &>(target);
+                const Slot slot = FindBinding(state, variable.name);
 
                 if (slot.value == nullptr)
                 {
@@ -1934,15 +2005,16 @@ namespace ForradiaLang
                 return;
             }
 
-            if (const auto *member =
-                    dynamic_cast<const MemberExpression *>(&target))
+            if (target.kind == ExpressionKind::Member)
             {
-                const std::string group = GroupName(state, *member->object);
+                const auto &member =
+                    static_cast<const MemberExpression &>(target);
+                const std::string group = GroupName(state, *member.object);
 
                 if (!group.empty())
                 {
                     const Slot slot =
-                        GroupMemberSlot(state, group, member->memberName);
+                        GroupMemberSlot(state, group, member.memberName);
 
                     if (slot.value == nullptr)
                     {
@@ -1954,7 +2026,7 @@ namespace ForradiaLang
                     return;
                 }
 
-                const Slot parent = ResolveSlot(state, *member->object);
+                const Slot parent = ResolveSlot(state, *member.object);
 
                 if (parent.value == nullptr)
                 {
@@ -1968,15 +2040,15 @@ namespace ForradiaLang
 
                 if (auto *size = std::get_if<Size>(parent.value))
                 {
-                    if (member->memberName != "width" &&
-                        member->memberName != "height")
+                    if (member.memberName != "width" &&
+                        member.memberName != "height")
                     {
                         throw std::runtime_error("Unknown member.");
                     }
 
                     RejectConstant(parent.isConstant);
 
-                    if (member->memberName == "width")
+                    if (member.memberName == "width")
                     {
                         size->width = AsNumber(value);
                     }
@@ -1990,14 +2062,14 @@ namespace ForradiaLang
 
                 if (auto *point = std::get_if<Point>(parent.value))
                 {
-                    if (member->memberName != "x" && member->memberName != "y")
+                    if (member.memberName != "x" && member.memberName != "y")
                     {
                         throw std::runtime_error("Unknown member.");
                     }
 
                     RejectConstant(parent.isConstant);
 
-                    if (member->memberName == "x")
+                    if (member.memberName == "x")
                     {
                         point->x = AsNumber(value);
                     }
@@ -2020,7 +2092,7 @@ namespace ForradiaLang
                         throw std::runtime_error("Unknown member.");
                     }
 
-                    const auto field = fields->second.find(member->memberName);
+                    const auto field = fields->second.find(member.memberName);
 
                     if (field == fields->second.end())
                     {
@@ -2029,8 +2101,9 @@ namespace ForradiaLang
 
                     RejectConstant(
                         parent.isConstant ||
-                        FieldIsConstant(state, instance->className,
-                                        member->memberName));
+                        FieldIsConstant(state,
+                                        ObjectClassName(state, *instance),
+                                        member.memberName));
                     field->second = std::move(value);
                     return;
                 }
@@ -2043,218 +2116,226 @@ namespace ForradiaLang
 
         void ExecuteStatement(ExecutionState &state, const Statement &statement)
         {
-            if (const auto *declaration =
-                    dynamic_cast<const IntStatement *>(&statement))
+            switch (statement.kind)
             {
-                Value value = Evaluate(state, *declaration->value);
+            case StatementKind::Int:
+            {
+                const auto &declaration =
+                    static_cast<const IntStatement &>(statement);
+                Value value = Evaluate(state, *declaration.value);
 
-                if (declaration->typeName == "Point" &&
+                if (declaration.typeName == "Point" &&
                     !std::holds_alternative<Point>(value))
                 {
                     throw std::runtime_error("Expected a point.");
                 }
 
-                if (declaration->typeName == "Size" &&
+                if (declaration.typeName == "Size" &&
                     !std::holds_alternative<Size>(value))
                 {
                     throw std::runtime_error("Expected a size.");
                 }
 
-                if (declaration->typeName == "Int")
+                if (declaration.typeName == "Int")
                 {
                     value = std::trunc(AsNumber(value));
                 }
 
-                if (IsNullable(declaration->typeName) ||
+                if (IsNullable(declaration.typeName) ||
                     state.classes.contains(
-                        UnderlyingType(declaration->typeName)))
+                        UnderlyingType(declaration.typeName)))
                 {
-                    ExpectElement(state, value, declaration->typeName);
+                    ExpectElement(state, value, declaration.typeName);
                 }
 
-                DefineName(state, declaration->name, std::move(value),
-                           declaration->isConstant);
+                DefineName(state, declaration.name, std::move(value),
+                           declaration.isConstant);
                 return;
             }
-
-            if (const auto *assignment =
-                    dynamic_cast<const AssignmentStatement *>(&statement))
+            case StatementKind::Assignment:
             {
-                AssignTo(state, *assignment->target,
-                         Evaluate(state, *assignment->value));
+                const auto &assignment =
+                    static_cast<const AssignmentStatement &>(statement);
+                AssignTo(state, *assignment.target,
+                         Evaluate(state, *assignment.value));
                 return;
             }
-
-            if (const auto *loop =
-                    dynamic_cast<const ForStatement *>(&statement))
+            case StatementKind::For:
             {
-                const double start = AsNumber(Evaluate(state, *loop->start));
-                const double end = AsNumber(Evaluate(state, *loop->end));
+                const auto &loop = static_cast<const ForStatement &>(statement);
+                const double start = AsNumber(Evaluate(state, *loop.start));
+                const double end = AsNumber(Evaluate(state, *loop.end));
 
-                if (NameIsConstant(state, loop->name))
+                if (NameIsConstant(state, loop.name))
                 {
                     throw std::runtime_error("Cannot change a constant.");
                 }
 
+                Value &loopVariable = state.variables[loop.name];
+
                 for (double value = start; value <= end; value += 1.0)
                 {
-                    state.variables[loop->name] = value;
+                    loopVariable = value;
+                    ExecuteBlock(state, loop.body);
 
-                    try
+                    if (state.controlFlow == ControlFlow::Continue)
                     {
-                        ExecuteBlock(state, loop->body);
+                        state.controlFlow = ControlFlow::None;
+                        continue;
                     }
-                    catch (const ContinueSignal &)
+
+                    if (state.controlFlow == ControlFlow::Return)
                     {
+                        return;
                     }
                 }
 
                 return;
             }
-
-            if (dynamic_cast<const ContinueStatement *>(&statement))
+            case StatementKind::Continue:
+                state.controlFlow = ControlFlow::Continue;
+                return;
+            case StatementKind::Return:
             {
-                throw ContinueSignal{};
-            }
-
-            if (const auto *returned =
-                    dynamic_cast<const ReturnStatement *>(&statement))
-            {
-                throw ReturnSignal{Evaluate(state, *returned->value)};
-            }
-
-            if (const auto *print =
-                    dynamic_cast<const PrintStatement *>(&statement))
-            {
-                PrintValue(Evaluate(state, *print->expression));
+                const auto &returned =
+                    static_cast<const ReturnStatement &>(statement);
+                state.returnValue = Evaluate(state, *returned.value);
+                state.controlFlow = ControlFlow::Return;
                 return;
             }
-
-            if (const auto *conditional =
-                    dynamic_cast<const IfStatement *>(&statement))
+            case StatementKind::Print:
             {
-                if (IsTrue(Evaluate(state, *conditional->condition)))
+                const auto &print =
+                    static_cast<const PrintStatement &>(statement);
+                PrintValue(Evaluate(state, *print.expression));
+                return;
+            }
+            case StatementKind::If:
+            {
+                const auto &conditional =
+                    static_cast<const IfStatement &>(statement);
+
+                if (IsTrue(Evaluate(state, *conditional.condition)))
                 {
-                    ExecuteBlock(state, conditional->thenBranch);
+                    ExecuteBlock(state, conditional.thenBranch);
                 }
                 else
                 {
-                    ExecuteBlock(state, conditional->elseBranch);
+                    ExecuteBlock(state, conditional.elseBranch);
                 }
 
                 return;
             }
-
-            if (dynamic_cast<const FunctionDeclaration *>(&statement) ||
-                dynamic_cast<const ClassDeclaration *>(&statement) ||
-                dynamic_cast<const SceneDeclaration *>(&statement))
-            {
+            case StatementKind::Function:
+            case StatementKind::Class:
+            case StatementKind::Scene:
                 return;
-            }
-
-            if (const auto *import =
-                    dynamic_cast<const ImportStatement *>(&statement))
+            case StatementKind::Import:
             {
-                if (Graphics::IsModule(import->moduleName) ||
-                    Coloring::IsModule(import->moduleName) ||
-                    ScenesCore::IsModule(import->moduleName))
+                const auto &import =
+                    static_cast<const ImportStatement &>(statement);
+
+                if (Graphics::IsModule(import.moduleName) ||
+                    Coloring::IsModule(import.moduleName) ||
+                    ScenesCore::IsModule(import.moduleName))
                 {
                     return;
                 }
 
                 throw std::runtime_error("Unknown module.");
             }
-
-            if (const auto *object =
-                    dynamic_cast<const ObjectStatement *>(&statement))
+            case StatementKind::Object:
             {
-                if (Coloring::IsColorType(object->typeName))
+                const auto &object =
+                    static_cast<const ObjectStatement &>(statement);
+
+                if (Coloring::IsColorType(object.typeName))
                 {
-                    if (object->arguments.size() != 4)
+                    if (object.arguments.size() != 4)
                     {
                         throw std::runtime_error("Expected four arguments.");
                     }
 
                     const double red =
-                        AsNumber(Evaluate(state, *object->arguments[0]));
+                        AsNumber(Evaluate(state, *object.arguments[0]));
                     const double green =
-                        AsNumber(Evaluate(state, *object->arguments[1]));
+                        AsNumber(Evaluate(state, *object.arguments[1]));
                     const double blue =
-                        AsNumber(Evaluate(state, *object->arguments[2]));
+                        AsNumber(Evaluate(state, *object.arguments[2]));
                     const double alpha =
-                        AsNumber(Evaluate(state, *object->arguments[3]));
+                        AsNumber(Evaluate(state, *object.arguments[3]));
 
-                    DefineName(state, object->name,
+                    DefineName(state, object.name,
                                Coloring::Color{red, green, blue, alpha},
-                               object->isConstant);
+                               object.isConstant);
                     return;
                 }
 
-                if (object->typeName == "Point")
+                if (object.typeName == "Point")
                 {
-                    DefineName(state, object->name,
-                               MakePoint(state, object->arguments),
-                               object->isConstant);
+                    DefineName(state, object.name,
+                               MakePoint(state, object.arguments),
+                               object.isConstant);
                     return;
                 }
 
-                if (object->typeName == "Size")
+                if (object.typeName == "Size")
                 {
-                    DefineName(state, object->name,
-                               MakeSize(state, object->arguments),
-                               object->isConstant);
+                    DefineName(state, object.name,
+                               MakeSize(state, object.arguments),
+                               object.isConstant);
                     return;
                 }
 
-                if (state.sceneTypes.contains(object->typeName))
+                if (state.sceneTypes.contains(object.typeName))
                 {
-                    if (!object->arguments.empty())
+                    if (!object.arguments.empty())
                     {
                         throw std::runtime_error("Unexpected arguments.");
                     }
 
-                    DefineName(state, object->name, SceneObject{object->typeName},
-                               object->isConstant);
+                    DefineName(state, object.name, SceneObject{object.typeName},
+                               object.isConstant);
                     return;
                 }
 
-                const auto classInfo = state.classes.find(object->typeName);
+                const auto classInfo = state.classes.find(object.typeName);
 
                 if (classInfo == state.classes.end())
                 {
                     throw std::runtime_error("Unknown class.");
                 }
 
-                if (!object->arguments.empty())
+                if (!object.arguments.empty())
                 {
                     throw std::runtime_error("Unexpected arguments.");
                 }
 
-                DefineName(state, object->name,
-                           MakeInstance(state, object->typeName),
-                           object->isConstant);
+                DefineName(state, object.name,
+                           MakeInstance(state, object.typeName),
+                           object.isConstant);
                 return;
             }
-
-            if (const auto *group =
-                    dynamic_cast<const GroupDeclaration *>(&statement))
+            case StatementKind::Group:
             {
+                const auto &group =
+                    static_cast<const GroupDeclaration &>(statement);
                 const std::string previousGroup = state.currentGroup;
 
                 if (previousGroup.empty())
                 {
-                    state.currentGroup = group->name;
+                    state.currentGroup = group.name;
                 }
                 else
                 {
-                    state.currentGroup = previousGroup + "." + group->name;
+                    state.currentGroup = previousGroup + "." + group.name;
                 }
 
                 state.groups.try_emplace(state.currentGroup);
 
                 try
                 {
-                    ExecuteBlock(state, group->body);
+                    ExecuteBlock(state, group.body);
                 }
                 catch (...)
                 {
@@ -2265,26 +2346,26 @@ namespace ForradiaLang
                 state.currentGroup = previousGroup;
                 return;
             }
-
-            if (const auto *method =
-                    dynamic_cast<const MethodCall *>(&statement))
+            case StatementKind::MethodCall:
             {
-                const Value receiver = Evaluate(state, *method->object);
+                const auto &method =
+                    static_cast<const MethodCall &>(statement);
+                const Value receiver = Evaluate(state, *method.object);
 
                 if (const auto *list = std::get_if<ListRef>(&receiver))
                 {
-                    if (method->methodName != "Add")
+                    if (method.methodName != "Add")
                     {
                         throw std::runtime_error("Unknown method.");
                     }
 
-                    if (method->arguments.size() != 1)
+                    if (method.arguments.size() != 1)
                     {
                         throw std::runtime_error("Expected one argument.");
                     }
 
                     AddElement(state, *list,
-                               Evaluate(state, *method->arguments[0]));
+                               Evaluate(state, *method.arguments[0]));
                     return;
                 }
 
@@ -2295,95 +2376,111 @@ namespace ForradiaLang
                     throw std::runtime_error("Expected an object.");
                 }
 
-                CallObjectMethod(state, *instance, method->methodName,
-                                 EvaluateArguments(state, method->arguments));
+                {
+                    const std::vector<Value> &arguments =
+                        PushArguments(state, method.arguments);
+
+                    try
+                    {
+                        CallObjectMethod(state, *instance, method.methodName,
+                                         arguments);
+                    }
+                    catch (...)
+                    {
+                        PopArguments(state);
+                        throw;
+                    }
+
+                    PopArguments(state);
+                }
                 return;
             }
-
-            if (const auto *call =
-                    dynamic_cast<const FunctionCall *>(&statement))
+            case StatementKind::FunctionCall:
             {
-                if (call->name == "InitializeGraphics")
+                const auto &call =
+                    static_cast<const FunctionCall &>(statement);
+
+                if (call.name == "InitializeGraphics")
                 {
-                    InitializeGraphics(state, *call);
+                    InitializeGraphics(state, call);
                     return;
                 }
 
-                if (call->name == "SetClearColor")
+                if (call.name == "SetClearColor")
                 {
-                    SetClearColor(state, *call);
+                    SetClearColor(state, call);
                     return;
                 }
 
-                if (call->name == "LoadImages")
+                if (call.name == "LoadImages")
                 {
-                    LoadImages(state, *call);
+                    LoadImages(state, call);
                     return;
                 }
 
-                if (call->name == "InitializeText")
+                if (call.name == "InitializeText")
                 {
-                    InitializeText(state, *call);
+                    InitializeText(state, call);
                     return;
                 }
 
-                if (call->name == "AddFontSizes")
+                if (call.name == "AddFontSizes")
                 {
-                    AddFontSizes(state, *call);
+                    AddFontSizes(state, call);
                     return;
                 }
 
-                if (call->name == "AddCursorStyle")
+                if (call.name == "AddCursorStyle")
                 {
-                    AddCursorStyle(state, *call);
+                    AddCursorStyle(state, call);
                     return;
                 }
 
-                if (call->name == "SetDefaultCursorStyle")
+                if (call.name == "SetDefaultCursorStyle")
                 {
-                    SetDefaultCursorStyle(state, *call);
+                    SetDefaultCursorStyle(state, call);
                     return;
                 }
 
-                if (call->name == "EnableFPSCounter")
+                if (call.name == "EnableFPSCounter")
                 {
-                    EnableFPSCounter(state, *call);
+                    EnableFPSCounter(state, call);
                     return;
                 }
 
-                if (call->name == "DrawImage")
+                if (call.name == "DrawImage")
                 {
-                    DrawImage(state, *call);
+                    DrawImage(state, call);
                     return;
                 }
 
-                if (call->name == "DrawString")
+                if (call.name == "DrawString")
                 {
-                    DrawString(state, *call);
+                    DrawString(state, call);
                     return;
                 }
 
-                if (call->name == "AddScene")
+                if (call.name == "AddScene")
                 {
-                    AddScene(state, *call);
+                    AddScene(state, call);
                     return;
                 }
 
-                if (call->name == "GoToScene")
+                if (call.name == "GoToScene")
                 {
-                    GoToScene(state, *call);
+                    GoToScene(state, call);
                     return;
                 }
 
-                const auto found = state.functions.find(call->name);
+                const auto found = state.functions.find(call.name);
 
                 if (found == state.functions.end())
                 {
                     throw std::runtime_error("Unknown function.");
                 }
 
-                const std::vector<Value> arguments =
-                    EvaluateArguments(state, call->arguments);
+                const std::vector<Value> &arguments =
+                    PushArguments(state, call.arguments);
                 const std::string previousGroup = state.currentGroup;
                 state.currentGroup.clear();
                 std::vector<SavedVariable> saved;
@@ -2392,30 +2489,32 @@ namespace ForradiaLang
                 {
                     BindParameters(state, *found->second, arguments, saved);
                     ExecuteBlock(state, found->second->body);
-                }
-                catch (const ReturnSignal &returned)
-                {
-                    RestoreParameters(state, saved);
-                    state.currentGroup = previousGroup;
 
-                    if (!found->second->returnType.empty())
+                    if (state.controlFlow == ControlFlow::Return)
                     {
-                        ExpectElement(state, returned.value,
-                                      found->second->returnType);
-                    }
+                        if (!found->second->returnType.empty())
+                        {
+                            ExpectElement(state, state.returnValue,
+                                          found->second->returnType);
+                        }
 
-                    return;
+                        state.controlFlow = ControlFlow::None;
+                        state.returnValue = Null{};
+                    }
                 }
                 catch (...)
                 {
                     RestoreParameters(state, saved);
                     state.currentGroup = previousGroup;
+                    PopArguments(state);
                     throw;
                 }
 
                 RestoreParameters(state, saved);
                 state.currentGroup = previousGroup;
+                PopArguments(state);
                 return;
+            }
             }
 
             throw std::runtime_error("Unknown statement.");
@@ -2427,16 +2526,18 @@ namespace ForradiaLang
         {
             for (const auto &statement : statements)
             {
-                if (const auto *function =
-                        dynamic_cast<const FunctionDeclaration *>(
-                            statement.get()))
+                if (statement->kind == StatementKind::Function)
                 {
+                    const auto *function =
+                        static_cast<const FunctionDeclaration *>(
+                            statement.get());
                     state.functions[function->name] = function;
                 }
 
-                if (const auto *declaration =
-                        dynamic_cast<const ClassDeclaration *>(statement.get()))
+                if (statement->kind == StatementKind::Class)
                 {
+                    const auto *declaration =
+                        static_cast<const ClassDeclaration *>(statement.get());
                     ClassInfo info;
 
                     for (const auto &method : declaration->methods)
@@ -2449,6 +2550,7 @@ namespace ForradiaLang
                         info.fields.push_back(FieldInfo{field.typeName, field.name,
                                                              field.value.get(),
                                                              field.isConstant});
+                        info.fieldConstant[field.name] = field.isConstant;
                     }
 
                     if (declaration->hasConstructor)
@@ -2459,9 +2561,10 @@ namespace ForradiaLang
                     state.classes[declaration->name] = std::move(info);
                 }
 
-                if (const auto *scene =
-                        dynamic_cast<const SceneDeclaration *>(statement.get()))
+                if (statement->kind == StatementKind::Scene)
                 {
+                    const auto *scene =
+                        static_cast<const SceneDeclaration *>(statement.get());
                     state.sceneTypes[scene->name] = SceneType{
                         &scene->update,
                         &scene->draw,
@@ -2490,6 +2593,12 @@ namespace ForradiaLang
             }
 
             ExecuteBlock(state, *found->second.update);
+
+            if (HasControlFlow(state))
+            {
+                throw std::runtime_error("Unexpected statement.");
+            }
+
             std::cout.flush();
         }
 
@@ -2509,6 +2618,11 @@ namespace ForradiaLang
             }
 
             ExecuteBlock(state, *found->second.draw);
+
+            if (HasControlFlow(state))
+            {
+                throw std::runtime_error("Unexpected statement.");
+            }
         }
 
         void RunSceneMouseDown(ExecutionState &state, int button)
@@ -2624,33 +2738,28 @@ namespace ForradiaLang
             }
         } guard;
 
-        try
-        {
-            ExecutionState state;
-            state.sourceDirectory = sourceDirectory;
-            state.variables["FRD_Fullscreen"] = Graphics::FullscreenFlag();
-            state.variables["FRD_Windowed"] = Graphics::WindowedFlag();
-            state.variables["True"] = 1.0;
-            state.variables["False"] = 0.0;
-            state.variables["Nothing"] = Null{};
-            state.constants.insert("Nothing");
+        ExecutionState state;
+        state.sourceDirectory = sourceDirectory;
+        state.variables["FRD_Fullscreen"] = Graphics::FullscreenFlag();
+        state.variables["FRD_Windowed"] = Graphics::WindowedFlag();
+        state.variables["True"] = 1.0;
+        state.variables["False"] = 0.0;
+        state.variables["Nothing"] = Null{};
+        state.constants.insert("Nothing");
 
-            RegisterFunctions(state, statements);
-            ExecuteBlock(state, statements);
-            std::cout.flush();
-            Graphics::RunUntilClosed(
-                [&state]() { RunSceneUpdate(state); },
-                [&state]() { RunSceneDraw(state); },
-                [&state](int button) { RunSceneMouseDown(state, button); },
-                [&state](int key) { RunSceneKeyDown(state, key); });
-        }
-        catch (const ContinueSignal &)
+        RegisterFunctions(state, statements);
+        ExecuteBlock(state, statements);
+
+        if (HasControlFlow(state))
         {
             throw std::runtime_error("Unexpected statement.");
         }
-        catch (const ReturnSignal &)
-        {
-            throw std::runtime_error("Unexpected statement.");
-        }
+
+        std::cout.flush();
+        Graphics::RunUntilClosed(
+            [&state]() { RunSceneUpdate(state); },
+            [&state]() { RunSceneDraw(state); },
+            [&state](int button) { RunSceneMouseDown(state, button); },
+            [&state](int key) { RunSceneKeyDown(state, key); });
     }
 }

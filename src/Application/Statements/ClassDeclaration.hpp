@@ -17,6 +17,10 @@ namespace ForradiaLang
     class ClassDeclaration : public Statement
     {
       public:
+        ClassDeclaration() : Statement(StatementKind::Class)
+        {
+        }
+
         std::string name;
         std::vector<FieldDeclaration> fields;
         std::vector<std::unique_ptr<FunctionDeclaration>> methods;
