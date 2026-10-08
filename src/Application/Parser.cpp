@@ -571,9 +571,10 @@ namespace ForradiaLang
 
         std::unique_ptr<Statement> ParseIntStatement(ParseState &state)
         {
-            Advance(state);
+            const Token &typeToken = Advance(state);
 
             auto statement = std::make_unique<IntStatement>();
+            statement->typeName = typeToken.value;
             statement->name =
                 Expect(state, TokenTypes::Identifier, "Expected a name.").value;
 
@@ -725,7 +726,8 @@ namespace ForradiaLang
 
             if (name == "SetClearColor" || name == "DrawImage" ||
                 name == "DrawString" || name == "LoadImages" ||
-                name == "InitializeText" || name == "AddFontSizes")
+                name == "InitializeText" || name == "AddFontSizes" ||
+                name == "EnableFPSCounter")
             {
                 auto statement = std::make_unique<FunctionCall>();
                 statement->name = name;

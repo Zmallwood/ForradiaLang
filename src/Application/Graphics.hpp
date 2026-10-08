@@ -30,6 +30,8 @@ namespace ForradiaLang
 
         void SetDefaultCursorStyle(std::string_view styleName);
 
+        void EnableFPSCounter(double x, double y, int fontSize);
+
         void DrawImage(std::string_view name, double x, double y,
                        double width, double height);
 

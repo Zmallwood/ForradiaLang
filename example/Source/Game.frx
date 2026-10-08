@@ -25,6 +25,8 @@ Class Game
 
         SetDefaultCursorStyle "Default"
 
+        EnableFPSCounter 0.95, 0.03, 18
+
         AddScene "IntroScene", gIntroScene
         AddScene "MainMenuScene", gMainMenuScene
         AddScene "WorldGenerationScene", gWorldGenerationScene

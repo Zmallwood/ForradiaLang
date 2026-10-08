@@ -1,5 +1,37 @@
 ' Copyright (c) 2026 Andreas Åkerberg
 ' SPDX-License-Identifier: MIT
 
+Import Core.WorldStructure.World
+
 Fn GenerateWater
+    WorldArea worldArea = gWorld.currentWorldArea
+
+    Size size = worldArea.GetSize
+
+    Int numLakes = RandomInt(15, 20)
+
+    For i = 1 To numLakes
+        Int xCenter = RandomInt(0, size.width - 1)
+        Int yCenter = RandomInt(0, size.height - 1)
+        Int radius = RandomInt(4, 15)
+
+        For y = yCenter - radius To yCenter + radius
+            For x = xCenter - radius To xCenter + radius
+                If Not worldArea.IsValidCoordinate(x, y) Then
+                    Continue
+                End
+
+                Int dx = x - xCenter
+                Int dy = y - yCenter
+
+                If dx*dx + dy*dy > radius*radius Then
+                    Continue
+                End
+
+                Tile? tile = worldArea.GetTile(x, y)
+
+                tile.groundType = "GroundWater"
+            Next
+        Next
+    Next
 End

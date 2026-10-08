@@ -16,6 +16,8 @@ Class WorldView
 
         Size size = worldArea.GetSize
 
+        Const Double kSmallValue = 0.001
+
         For y = 0 To 10
             For x = 0 To 10
                 Int xCoordinate = playerPosition.x - 5 + x
@@ -35,10 +37,17 @@ Class WorldView
 
                 Double xPx = 0.5 - tileWidth/2 + x*tileWidth/2 - y*tileWidth/2
                 Double yPx = 0.5 - 5.5*tileHeight + x*tileHeight/2 + y*tileHeight/2
-                Double widthPx = tileWidth
-                Double heightPx = tileHeight
+                Double widthPx = tileWidth + kSmallValue
+                Double heightPx = tileHeight + kSmallValue
                 
                 If Not groundType == String.Empty Then
+
+                    If groundType == "GroundWater" Then
+                        Int animIndex = ((Now() + 10 * xCoordinate * yCoordinate) % 900) / 300
+
+                        groundType = "GroundWater_" + animIndex.ToString()
+                    End
+
                     DrawImage groundType, xPx, yPx, widthPx, heightPx
                 End
 

@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <optional>
+#include <random>
 #include <unordered_set>
 
 #include "Coloring.hpp"
@@ -167,6 +168,28 @@ namespace ForradiaLang
             throw std::runtime_error("Expected a string.");
         }
 
+        std::string ToStringValue(const Value &value)
+        {
+            if (const auto *text = std::get_if<std::string>(&value))
+            {
+                return *text;
+            }
+
+            if (const auto *number = std::get_if<double>(&value))
+            {
+                if (std::isfinite(*number) && std::floor(*number) == *number)
+                {
+                    return std::to_string(static_cast<long long>(*number));
+                }
+
+                std::ostringstream stream;
+                stream << *number;
+                return stream.str();
+            }
+
+            throw std::runtime_error("Expected a value.");
+        }
+
         bool IsTrue(const Value &value)
         {
             if (const auto *number = std::get_if<double>(&value))
@@ -237,7 +260,7 @@ namespace ForradiaLang
         {
             if (state.currentGroup.empty())
             {
-                if (state.constants.contains(name))
+                if (state.constants.contains(name) && !isConstant)
                 {
                     throw std::runtime_error("Cannot change a constant.");
                 }
@@ -255,7 +278,7 @@ namespace ForradiaLang
             const auto constants = state.groupConstants.find(state.currentGroup);
 
             if (constants != state.groupConstants.end() &&
-                constants->second.contains(name))
+                constants->second.contains(name) && !isConstant)
             {
                 throw std::runtime_error("Cannot change a constant.");
             }
@@ -506,14 +529,25 @@ namespace ForradiaLang
                 return AsNumber(left) == AsNumber(right) ? 1.0 : 0.0;
             }
 
+            if (expression.operation == '+')
+            {
+                const Value left = Evaluate(state, *expression.left);
+                const Value right = Evaluate(state, *expression.right);
+
+                if (std::holds_alternative<std::string>(left) ||
+                    std::holds_alternative<std::string>(right))
+                {
+                    return ToStringValue(left) + ToStringValue(right);
+                }
+
+                return AsNumber(left) + AsNumber(right);
+            }
+
             const double left = AsNumber(Evaluate(state, *expression.left));
             const double right = AsNumber(Evaluate(state, *expression.right));
 
             switch (expression.operation)
             {
-            case '+':
-                return left + right;
-
             case '-':
                 return left - right;
 
@@ -561,6 +595,39 @@ namespace ForradiaLang
                 }
 
                 return static_cast<double>(SDL_GetTicks());
+            }
+
+            if (expression.name == "RandomInt")
+            {
+                if (expression.arguments.size() != 2)
+                {
+                    throw std::runtime_error("Expected two arguments.");
+                }
+
+                const double minimum =
+                    AsNumber(Evaluate(state, *expression.arguments[0]));
+                const double maximum =
+                    AsNumber(Evaluate(state, *expression.arguments[1]));
+
+                if (std::floor(minimum) != minimum ||
+                    std::floor(maximum) != maximum)
+                {
+                    throw std::runtime_error("Expected integer bounds.");
+                }
+
+                const int minimumValue = static_cast<int>(minimum);
+                const int maximumValue = static_cast<int>(maximum);
+
+                if (maximumValue < minimumValue)
+                {
+                    throw std::runtime_error("Expected a valid range.");
+                }
+
+                static std::mt19937 generator{std::random_device{}()};
+                std::uniform_int_distribution<int> distribution(minimumValue,
+                                                                maximumValue);
+
+                return static_cast<double>(distribution(generator));
             }
 
             if (expression.name == "ConvertWidthToHeight")
@@ -869,6 +936,16 @@ namespace ForradiaLang
                 return *returned;
             }
 
+            if (expression.memberName == "ToString")
+            {
+                if (!expression.isCall || !expression.arguments.empty())
+                {
+                    throw std::runtime_error("Unexpected arguments.");
+                }
+
+                return ToStringValue(object);
+            }
+
             throw std::runtime_error("Unknown member.");
         }
 
@@ -1067,6 +1144,21 @@ namespace ForradiaLang
 
             Graphics::SetDefaultCursorStyle(
                 AsString(Evaluate(state, *call.arguments[0])));
+        }
+
+        void EnableFPSCounter(ExecutionState &state, const FunctionCall &call)
+        {
+            if (call.arguments.size() != 3)
+            {
+                throw std::runtime_error("Expected three arguments.");
+            }
+
+            const double x = AsNumber(Evaluate(state, *call.arguments[0]));
+            const double y = AsNumber(Evaluate(state, *call.arguments[1]));
+            const int fontSize = static_cast<int>(
+                AsNumber(Evaluate(state, *call.arguments[2])));
+
+            Graphics::EnableFPSCounter(x, y, fontSize);
         }
 
         void DrawImage(ExecutionState &state, const FunctionCall &call)
@@ -1420,6 +1512,11 @@ namespace ForradiaLang
                 if (!std::holds_alternative<double>(value))
                 {
                     throw std::runtime_error("Expected a number.");
+                }
+
+                if (field.typeName == "Int")
+                {
+                    return std::trunc(AsNumber(value));
                 }
 
                 return value;
@@ -1963,6 +2060,11 @@ namespace ForradiaLang
                     throw std::runtime_error("Expected a size.");
                 }
 
+                if (declaration->typeName == "Int")
+                {
+                    value = std::trunc(AsNumber(value));
+                }
+
                 if (IsNullable(declaration->typeName) ||
                     state.classes.contains(
                         UnderlyingType(declaration->typeName)))
@@ -2240,6 +2342,12 @@ namespace ForradiaLang
                 if (call->name == "SetDefaultCursorStyle")
                 {
                     SetDefaultCursorStyle(state, *call);
+                    return;
+                }
+
+                if (call->name == "EnableFPSCounter")
+                {
+                    EnableFPSCounter(state, *call);
                     return;
                 }
 

@@ -37,6 +37,13 @@ namespace ForradiaLang
         int confinedCursorWidth = 0;
         int confinedCursorHeight = 0;
         SDL_Cursor *blankSdlCursor = nullptr;
+        bool fpsCounterEnabled = false;
+        double fpsCounterX = 0.0;
+        double fpsCounterY = 0.0;
+        int fpsCounterFontSize = 12;
+        Uint32 fpsSampleStartTicks = 0;
+        int fpsFramesCounted = 0;
+        int fpsDisplayed = 0;
 #ifdef _WIN32
         HCURSOR blankWinCursor = nullptr;
         HWND cursorHookWindow = nullptr;
@@ -93,6 +100,42 @@ namespace ForradiaLang
             SDL_SetRenderDrawColor(renderer, clearRed, clearGreen, clearBlue,
                                    clearAlpha);
             SDL_RenderClear(renderer);
+        }
+
+        void UpdateFPSCounter()
+        {
+            ++fpsFramesCounted;
+
+            const Uint32 now = SDL_GetTicks();
+
+            if (fpsSampleStartTicks == 0)
+            {
+                fpsSampleStartTicks = now;
+                return;
+            }
+
+            const Uint32 elapsed = now - fpsSampleStartTicks;
+
+            if (elapsed >= 1000)
+            {
+                fpsDisplayed =
+                    static_cast<int>((fpsFramesCounted * 1000) / elapsed);
+                fpsFramesCounted = 0;
+                fpsSampleStartTicks = now;
+            }
+        }
+
+        void DrawFPSCounter()
+        {
+            if (!fpsCounterEnabled || renderer == nullptr ||
+                !fonts.contains(fpsCounterFontSize))
+            {
+                return;
+            }
+
+            const std::string text = std::to_string(fpsDisplayed) + " FPS";
+            Graphics::DrawString(text, fpsCounterX, fpsCounterY,
+                                 fpsCounterFontSize, false);
         }
 
         void Present()
@@ -892,6 +935,22 @@ namespace ForradiaLang
         HideSystemCursor();
     }
 
+    void Graphics::EnableFPSCounter(double x, double y, int fontSize)
+    {
+        if (fontSize <= 0)
+        {
+            throw std::runtime_error("Expected a positive font size.");
+        }
+
+        fpsCounterEnabled = true;
+        fpsCounterX = x;
+        fpsCounterY = y;
+        fpsCounterFontSize = fontSize;
+        fpsSampleStartTicks = 0;
+        fpsFramesCounted = 0;
+        fpsDisplayed = 0;
+    }
+
     void Graphics::DrawString(std::string_view text, double x, double y,
                               int fontSize, bool centered)
     {
@@ -1110,6 +1169,8 @@ namespace ForradiaLang
                 draw();
             }
 
+            UpdateFPSCounter();
+            DrawFPSCounter();
             DrawCursor();
 
             Present();
@@ -1120,6 +1181,13 @@ namespace ForradiaLang
 
     void Graphics::Shutdown()
     {
+        fpsCounterEnabled = false;
+        fpsCounterX = 0.0;
+        fpsCounterY = 0.0;
+        fpsCounterFontSize = 12;
+        fpsSampleStartTicks = 0;
+        fpsFramesCounted = 0;
+        fpsDisplayed = 0;
         defaultCursorStyle.clear();
         cursorStyles.clear();
         ReleaseCursorConfine();
