@@ -1,16 +1,19 @@
 #include "Parser.hpp"
 #include "Expressions/BinaryExpression.hpp"
 #include "Expressions/CallExpression.hpp"
+#include "Expressions/IndexExpression.hpp"
 #include "Expressions/ListExpression.hpp"
 #include "Expressions/MemberExpression.hpp"
 #include "Expressions/NumberExpression.hpp"
 #include "Expressions/StringExpression.hpp"
 #include "Expressions/VariableExpression.hpp"
+#include "Statements/AssignmentStatement.hpp"
 #include "Statements/ClassDeclaration.hpp"
 #include "Statements/ContinueStatement.hpp"
 #include "Statements/ForStatement.hpp"
 #include "Statements/FunctionCall.hpp"
 #include "Statements/FunctionDeclaration.hpp"
+#include "Statements/GroupDeclaration.hpp"
 #include "Statements/IfStatement.hpp"
 #include "Statements/ImportStatement.hpp"
 #include "Statements/IntStatement.hpp"
@@ -104,8 +107,11 @@ namespace ForradiaLang
         std::unique_ptr<Expression> ParseExpression(ParseState &state);
         std::vector<std::unique_ptr<Expression>>
         ParseArguments(ParseState &state);
+        std::string ParseTypeName(ParseState &state);
         std::unique_ptr<Statement> ParseIdentifierStatement(ParseState &state);
         std::unique_ptr<Statement> ParseStatement(ParseState &state);
+        std::unique_ptr<Statement> ParseConstStatement(ParseState &state);
+        std::unique_ptr<Statement> ParseGroup(ParseState &state);
 
         std::unique_ptr<Expression> ParseList(ParseState &state)
         {
@@ -131,6 +137,73 @@ namespace ForradiaLang
 
             Expect(state, TokenTypes::RightBracket, "Expected ']'.");
             return expression;
+        }
+
+        bool FollowedByGenericCall(const ParseState &state)
+        {
+            if (AtEnd(state) || Peek(state).type != TokenTypes::LessThan)
+            {
+                return false;
+            }
+
+            int depth = 0;
+
+            for (std::size_t index = state.index; index < state.tokens.size();
+                 ++index)
+            {
+                const TokenTypes type = state.tokens[index].type;
+
+                if (type == TokenTypes::LessThan)
+                {
+                    ++depth;
+                    continue;
+                }
+
+                if (type == TokenTypes::GreaterThan)
+                {
+                    --depth;
+
+                    if (depth == 0)
+                    {
+                        const std::size_t next = index + 1;
+
+                        return next < state.tokens.size() &&
+                               state.tokens[next].type ==
+                                   TokenTypes::LeftParen;
+                    }
+
+                    continue;
+                }
+
+                if (type == TokenTypes::Newline)
+                {
+                    return false;
+                }
+            }
+
+            return false;
+        }
+
+        void AppendGenericArguments(ParseState &state, std::string &name)
+        {
+            Expect(state, TokenTypes::LessThan, "Expected '<'.");
+            name += '<';
+            name += ParseTypeName(state);
+            Expect(state, TokenTypes::GreaterThan, "Expected '>'.");
+            name += '>';
+        }
+
+        std::unique_ptr<Expression>
+        ParseIndex(ParseState &state, std::unique_ptr<Expression> object)
+        {
+            Advance(state);
+
+            auto indexed = std::make_unique<IndexExpression>();
+            indexed->object = std::move(object);
+            indexed->index = ParseExpression(state);
+            Expect(state, TokenTypes::RightBracket, "Expected ']'.");
+
+            return indexed;
         }
 
         std::unique_ptr<Expression> ParsePrimary(ParseState &state)
@@ -182,7 +255,19 @@ namespace ForradiaLang
                 std::unique_ptr<Expression> expression;
 
                 if (!AtEnd(state) &&
-                    Peek(state).type == TokenTypes::LeftParen)
+                    Peek(state).type == TokenTypes::LessThan &&
+                    FollowedByGenericCall(state))
+                {
+                    std::string name = token.value;
+                    AppendGenericArguments(state, name);
+
+                    auto call = std::make_unique<CallExpression>();
+                    call->name = std::move(name);
+                    call->arguments = ParseArguments(state);
+                    expression = std::move(call);
+                }
+                else if (!AtEnd(state) &&
+                         Peek(state).type == TokenTypes::LeftParen)
                 {
                     auto call = std::make_unique<CallExpression>();
                     call->name = token.value;
@@ -196,8 +281,16 @@ namespace ForradiaLang
                     expression = std::move(variable);
                 }
 
-                while (!AtEnd(state) && Peek(state).type == TokenTypes::Dot)
+                while (!AtEnd(state) &&
+                       (Peek(state).type == TokenTypes::Dot ||
+                        Peek(state).type == TokenTypes::LeftBracket))
                 {
+                    if (Peek(state).type == TokenTypes::LeftBracket)
+                    {
+                        expression = ParseIndex(state, std::move(expression));
+                        continue;
+                    }
+
                     Advance(state);
 
                     auto member = std::make_unique<MemberExpression>();
@@ -542,14 +635,38 @@ namespace ForradiaLang
             case TokenTypes::Identifier:
                 return ParseIdentifierStatement(state);
 
+            case TokenTypes::Const:
+                return ParseConstStatement(state);
+
+            case TokenTypes::Group:
+                return ParseGroup(state);
+
             default:
                 throw std::runtime_error("Unexpected token.");
             }
         }
 
+        std::unique_ptr<Statement> ParseAssignment(ParseState &state,
+                                                   std::unique_ptr<Expression> target)
+        {
+            Expect(state, TokenTypes::Equals, "Expected '='.");
+
+            auto statement = std::make_unique<AssignmentStatement>();
+            statement->target = std::move(target);
+            statement->value = ParseExpression(state);
+            return statement;
+        }
+
         std::unique_ptr<Statement> ParseIdentifierStatement(ParseState &state)
         {
             const std::string name = Advance(state).value;
+
+            if (!AtEnd(state) && Peek(state).type == TokenTypes::Equals)
+            {
+                auto target = std::make_unique<VariableExpression>();
+                target->name = name;
+                return ParseAssignment(state, std::move(target));
+            }
 
             if (name == "SetClearColor" || name == "DrawImage" ||
                 name == "DrawString" || name == "LoadImages" ||
@@ -561,18 +678,60 @@ namespace ForradiaLang
                 return statement;
             }
 
-            if (!AtEnd(state) && Peek(state).type == TokenTypes::Dot)
+            if (!AtEnd(state) && (Peek(state).type == TokenTypes::Dot ||
+                                  Peek(state).type == TokenTypes::LeftBracket))
             {
-                Advance(state);
+                auto object = std::make_unique<VariableExpression>();
+                object->name = name;
+                std::unique_ptr<Expression> receiver = std::move(object);
 
-                auto statement = std::make_unique<MethodCall>();
-                statement->objectName = name;
-                statement->methodName =
-                    Expect(state, TokenTypes::Identifier, "Expected a name.")
-                        .value;
-                statement->arguments = ParseArguments(state);
+                while (!AtEnd(state) &&
+                       Peek(state).type == TokenTypes::LeftBracket)
+                {
+                    receiver = ParseIndex(state, std::move(receiver));
+                }
 
-                return statement;
+                while (!AtEnd(state) && Peek(state).type == TokenTypes::Dot)
+                {
+                    Advance(state);
+
+                    const std::string memberName =
+                        Expect(state, TokenTypes::Identifier, "Expected a name.")
+                            .value;
+
+                    const bool isMember =
+                        !AtEnd(state) &&
+                        (Peek(state).type == TokenTypes::Equals ||
+                         Peek(state).type == TokenTypes::Dot ||
+                         Peek(state).type == TokenTypes::LeftBracket);
+
+                    if (!isMember)
+                    {
+                        auto statement = std::make_unique<MethodCall>();
+                        statement->object = std::move(receiver);
+                        statement->methodName = memberName;
+                        statement->arguments = ParseArguments(state);
+                        return statement;
+                    }
+
+                    auto member = std::make_unique<MemberExpression>();
+                    member->object = std::move(receiver);
+                    member->memberName = memberName;
+                    receiver = std::move(member);
+
+                    while (!AtEnd(state) &&
+                           Peek(state).type == TokenTypes::LeftBracket)
+                    {
+                        receiver = ParseIndex(state, std::move(receiver));
+                    }
+                }
+
+                if (!AtEnd(state) && Peek(state).type == TokenTypes::Equals)
+                {
+                    return ParseAssignment(state, std::move(receiver));
+                }
+
+                throw std::runtime_error("Unexpected token.");
             }
 
             if (!AtEnd(state) && Peek(state).type == TokenTypes::Identifier &&
@@ -606,6 +765,48 @@ namespace ForradiaLang
             statement->arguments = ParseArguments(state);
 
             return statement;
+        }
+
+        std::unique_ptr<Statement> ParseConstStatement(ParseState &state)
+        {
+            Expect(state, TokenTypes::Const, "Expected 'Const'.");
+
+            if (AtEnd(state))
+            {
+                throw std::runtime_error("Expected a declaration.");
+            }
+
+            std::unique_ptr<Statement> statement;
+            const TokenTypes type = Peek(state).type;
+
+            if (type == TokenTypes::Int || type == TokenTypes::Double)
+            {
+                statement = ParseIntStatement(state);
+            }
+            else if (type == TokenTypes::Identifier)
+            {
+                statement = ParseIdentifierStatement(state);
+            }
+            else
+            {
+                throw std::runtime_error("Expected a declaration.");
+            }
+
+            if (auto *declaration =
+                    dynamic_cast<IntStatement *>(statement.get()))
+            {
+                declaration->isConstant = true;
+                return statement;
+            }
+
+            if (auto *object =
+                    dynamic_cast<ObjectStatement *>(statement.get()))
+            {
+                object->isConstant = true;
+                return statement;
+            }
+
+            throw std::runtime_error("Expected a declaration.");
         }
 
         std::unique_ptr<Statement> ParseImportStatement(ParseState &state)
@@ -692,6 +893,19 @@ namespace ForradiaLang
             return field;
         }
 
+        std::unique_ptr<Statement> ParseGroup(ParseState &state)
+        {
+            Expect(state, TokenTypes::Group, "Expected 'Group'.");
+
+            auto declaration = std::make_unique<GroupDeclaration>();
+            declaration->name =
+                Expect(state, TokenTypes::Identifier, "Expected a name.").value;
+            declaration->body = ParseBlock(state, false);
+            Expect(state, TokenTypes::End, "Expected 'End'.");
+
+            return declaration;
+        }
+
         std::unique_ptr<ClassDeclaration> ParseClass(ParseState &state)
         {
             Expect(state, TokenTypes::Class, "Expected 'Class'.");
@@ -712,6 +926,29 @@ namespace ForradiaLang
                 if (Peek(state).type == TokenTypes::Fn)
                 {
                     declaration->methods.push_back(ParseFunction(state));
+                    continue;
+                }
+
+                if (Peek(state).type == TokenTypes::New)
+                {
+                    if (declaration->hasConstructor)
+                    {
+                        throw std::runtime_error("Unexpected token.");
+                    }
+
+                    Advance(state);
+                    declaration->constructor = ParseBlock(state, false);
+                    Expect(state, TokenTypes::End, "Expected 'End'.");
+                    declaration->hasConstructor = true;
+                    continue;
+                }
+
+                if (Peek(state).type == TokenTypes::Const)
+                {
+                    Advance(state);
+                    FieldDeclaration field = ParseField(state);
+                    field.isConstant = true;
+                    declaration->fields.push_back(std::move(field));
                     continue;
                 }
 

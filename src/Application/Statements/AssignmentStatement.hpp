@@ -5,12 +5,10 @@
 
 namespace ForradiaLang
 {
-    class IntStatement : public Statement
+    class AssignmentStatement : public Statement
     {
       public:
-        std::string typeName;
-        std::string name;
+        std::unique_ptr<Expression> target;
         std::unique_ptr<Expression> value;
-        bool isConstant{false};
     };
 }

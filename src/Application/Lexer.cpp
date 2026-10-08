@@ -102,6 +102,21 @@ namespace ForradiaLang
                 return TokenTypes::Class;
             }
 
+            if (word == "Group")
+            {
+                return TokenTypes::Group;
+            }
+
+            if (word == "Const")
+            {
+                return TokenTypes::Const;
+            }
+
+            if (word == "New")
+            {
+                return TokenTypes::New;
+            }
+
             if (word == "Import")
             {
                 return TokenTypes::Import;

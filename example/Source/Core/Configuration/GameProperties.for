@@ -1,0 +1,6 @@
+' Copyright (c) 2026 Andreas Åkerberg
+' SPDX-License-Identifier: MIT
+
+Group GameProperties
+    Const Size kWorldAreaSize = Size(100, 100)
+End

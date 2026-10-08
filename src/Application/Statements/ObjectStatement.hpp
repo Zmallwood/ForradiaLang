@@ -11,5 +11,6 @@ namespace ForradiaLang
         std::string typeName;
         std::string name;
         std::vector<std::unique_ptr<Expression>> arguments;
+        bool isConstant{false};
     };
 }

@@ -1,10 +1,12 @@
 #include "Interpreter.hpp"
 
 #include <cmath>
+#include <unordered_set>
 
 #include "Coloring.hpp"
 #include "Expressions/BinaryExpression.hpp"
 #include "Expressions/CallExpression.hpp"
+#include "Expressions/IndexExpression.hpp"
 #include "Expressions/ListExpression.hpp"
 #include "Expressions/MemberExpression.hpp"
 #include "Expressions/NumberExpression.hpp"
@@ -12,11 +14,13 @@
 #include "Expressions/VariableExpression.hpp"
 #include "Graphics.hpp"
 #include "ScenesCore.hpp"
+#include "Statements/AssignmentStatement.hpp"
 #include "Statements/ClassDeclaration.hpp"
 #include "Statements/ContinueStatement.hpp"
 #include "Statements/ForStatement.hpp"
 #include "Statements/FunctionCall.hpp"
 #include "Statements/FunctionDeclaration.hpp"
+#include "Statements/GroupDeclaration.hpp"
 #include "Statements/IfStatement.hpp"
 #include "Statements/ImportStatement.hpp"
 #include "Statements/IntStatement.hpp"
@@ -35,6 +39,17 @@ namespace ForradiaLang
             double y{0.0};
         };
 
+        struct Size
+        {
+            double width{0.0};
+            double height{0.0};
+        };
+
+        struct GroupRef
+        {
+            std::string name;
+        };
+
         struct Object
         {
             std::string className;
@@ -46,6 +61,7 @@ namespace ForradiaLang
             std::string typeName;
             std::string name;
             const Expression *value{nullptr};
+            bool isConstant{false};
         };
 
         struct ClassInfo
@@ -53,6 +69,7 @@ namespace ForradiaLang
             std::unordered_map<std::string, const FunctionDeclaration *>
                 methods;
             std::vector<FieldInfo> fields;
+            const std::vector<std::unique_ptr<Statement>> *constructor{nullptr};
         };
 
         struct SceneObject
@@ -78,8 +95,8 @@ namespace ForradiaLang
         };
 
         using Value = std::variant<double, std::string, Object, Coloring::Color,
-                                   SceneObject, std::vector<double>, Point,
-                                   ListRef>;
+                                   SceneObject, std::vector<double>, Point, Size,
+                                   GroupRef, ListRef>;
 
         struct ListData
         {
@@ -95,10 +112,19 @@ namespace ForradiaLang
             std::unordered_map<std::string, ClassInfo> classes;
             std::unordered_map<std::string, SceneType> sceneTypes;
             std::unordered_map<std::string, std::string> addedScenes;
+            std::unordered_map<std::string,
+                               std::unordered_map<std::string, Value>>
+                groups;
+            std::unordered_set<std::string> constants;
+            std::unordered_map<std::string, std::unordered_set<std::string>>
+                groupConstants;
+            std::unordered_map<int, std::string> objectClasses;
+            std::string currentGroup;
             std::string currentSceneType;
             std::filesystem::path sourceDirectory;
             int nextObjectId{1};
             int nextListId{1};
+            int currentObjectId{0};
             std::unordered_map<int, std::unordered_map<std::string, Value>>
                 objectFields;
             std::unordered_map<int, ListData> lists;
@@ -173,9 +199,120 @@ namespace ForradiaLang
             throw std::runtime_error("Expected a value.");
         }
 
+        bool NameIsConstant(const ExecutionState &state,
+                            const std::string &name)
+        {
+            if (!state.currentGroup.empty())
+            {
+                const auto group = state.groups.find(state.currentGroup);
+
+                if (group != state.groups.end() &&
+                    group->second.contains(name))
+                {
+                    const auto constants =
+                        state.groupConstants.find(state.currentGroup);
+
+                    return constants != state.groupConstants.end() &&
+                           constants->second.contains(name);
+                }
+            }
+
+            return state.constants.contains(name);
+        }
+
+        void DefineName(ExecutionState &state, const std::string &name,
+                        Value value, bool isConstant)
+        {
+            if (state.currentGroup.empty())
+            {
+                if (state.constants.contains(name))
+                {
+                    throw std::runtime_error("Cannot change a constant.");
+                }
+
+                state.variables[name] = std::move(value);
+
+                if (isConstant)
+                {
+                    state.constants.insert(name);
+                }
+
+                return;
+            }
+
+            const auto constants = state.groupConstants.find(state.currentGroup);
+
+            if (constants != state.groupConstants.end() &&
+                constants->second.contains(name))
+            {
+                throw std::runtime_error("Cannot change a constant.");
+            }
+
+            state.groups[state.currentGroup][name] = std::move(value);
+
+            if (isConstant)
+            {
+                state.groupConstants[state.currentGroup].insert(name);
+            }
+        }
+
+        Value LookupName(ExecutionState &state, const std::string &name)
+        {
+            if (!state.currentGroup.empty())
+            {
+                const auto group = state.groups.find(state.currentGroup);
+
+                if (group != state.groups.end())
+                {
+                    const auto member = group->second.find(name);
+
+                    if (member != group->second.end())
+                    {
+                        return member->second;
+                    }
+                }
+            }
+
+            const auto found = state.variables.find(name);
+
+            if (found != state.variables.end())
+            {
+                return found->second;
+            }
+
+            if (state.currentObjectId != 0)
+            {
+                const auto fields =
+                    state.objectFields.find(state.currentObjectId);
+
+                if (fields != state.objectFields.end())
+                {
+                    const auto field = fields->second.find(name);
+
+                    if (field != fields->second.end())
+                    {
+                        return field->second;
+                    }
+                }
+            }
+
+            throw std::runtime_error("Unknown variable.");
+        }
+
         Value Evaluate(ExecutionState &state, const Expression &expression);
 
         Value EvaluateField(ExecutionState &state, const FieldInfo &field);
+
+        bool IsListType(std::string_view typeName);
+
+        std::string ListElementType(std::string_view typeName);
+
+        ListRef MakeList(ExecutionState &state,
+                         const std::string &elementType);
+
+        void ExecuteBlock(
+            ExecutionState &state,
+            const std::vector<std::unique_ptr<Statement>> &statements);
 
         Object MakeInstance(ExecutionState &state, const std::string &className)
         {
@@ -186,14 +323,38 @@ namespace ForradiaLang
                 throw std::runtime_error("Unknown class.");
             }
 
+            const std::vector<FieldInfo> fieldInfos = classInfo->second.fields;
+            const auto *constructor = classInfo->second.constructor;
             Object instance{className, state.nextObjectId++};
-            auto &fields = state.objectFields[instance.id];
+            state.objectClasses[instance.id] = className;
+            const int previousObject = state.currentObjectId;
+            const std::string previousGroup = state.currentGroup;
+            state.currentObjectId = instance.id;
+            state.currentGroup.clear();
 
-            for (const auto &field : classInfo->second.fields)
+            try
             {
-                fields[field.name] = EvaluateField(state, field);
+                for (const auto &field : fieldInfos)
+                {
+                    Value value = EvaluateField(state, field);
+                    state.objectFields[instance.id][field.name] =
+                        std::move(value);
+                }
+
+                if (constructor != nullptr)
+                {
+                    ExecuteBlock(state, *constructor);
+                }
+            }
+            catch (...)
+            {
+                state.currentObjectId = previousObject;
+                state.currentGroup = previousGroup;
+                throw;
             }
 
+            state.currentObjectId = previousObject;
+            state.currentGroup = previousGroup;
             return instance;
         }
 
@@ -210,9 +371,18 @@ namespace ForradiaLang
                          AsNumber(Evaluate(state, *arguments[1]))};
         }
 
-        void ExecuteBlock(
+        Size MakeSize(
             ExecutionState &state,
-            const std::vector<std::unique_ptr<Statement>> &statements);
+            const std::vector<std::unique_ptr<Expression>> &arguments)
+        {
+            if (arguments.size() != 2)
+            {
+                throw std::runtime_error("Expected two arguments.");
+            }
+
+            return Size{AsNumber(Evaluate(state, *arguments[0])),
+                        AsNumber(Evaluate(state, *arguments[1]))};
+        }
 
         struct ContinueSignal
         {
@@ -322,7 +492,98 @@ namespace ForradiaLang
                 return MakePoint(state, expression.arguments);
             }
 
+            if (expression.name == "Size")
+            {
+                return MakeSize(state, expression.arguments);
+            }
+
+            if (IsListType(expression.name))
+            {
+                if (!expression.arguments.empty())
+                {
+                    throw std::runtime_error("Unexpected arguments.");
+                }
+
+                return MakeList(state, ListElementType(expression.name));
+            }
+
+            if (state.classes.contains(expression.name))
+            {
+                if (!expression.arguments.empty())
+                {
+                    throw std::runtime_error("Unexpected arguments.");
+                }
+
+                return MakeInstance(state, expression.name);
+            }
+
             throw std::runtime_error("Unknown function.");
+        }
+
+        std::size_t AsIndex(const Value &value)
+        {
+            const double number = AsNumber(value);
+
+            if (number < 0.0 || std::floor(number) != number)
+            {
+                throw std::runtime_error("Expected an index.");
+            }
+
+            return static_cast<std::size_t>(number);
+        }
+
+        Value EvaluateIndex(ExecutionState &state,
+                            const IndexExpression &expression)
+        {
+            const std::size_t index =
+                AsIndex(Evaluate(state, *expression.index));
+            const Value object = Evaluate(state, *expression.object);
+            const auto *list = std::get_if<ListRef>(&object);
+
+            if (list == nullptr)
+            {
+                throw std::runtime_error("Expected a list.");
+            }
+
+            const auto found = state.lists.find(list->id);
+
+            if (found == state.lists.end())
+            {
+                throw std::runtime_error("Expected a list.");
+            }
+
+            if (index >= found->second.elements.size())
+            {
+                throw std::runtime_error("Unknown index.");
+            }
+
+            return found->second.elements[index];
+        }
+
+        Value LookupGroupMember(ExecutionState &state,
+                                const std::string &groupName,
+                                const std::string &memberName)
+        {
+            const auto group = state.groups.find(groupName);
+
+            if (group != state.groups.end())
+            {
+                const auto member = group->second.find(memberName);
+
+                if (member != group->second.end())
+                {
+                    return member->second;
+                }
+            }
+
+            const std::string nested = groupName + "." + memberName;
+
+            if (state.groups.contains(nested))
+            {
+                return GroupRef{nested};
+            }
+
+            throw std::runtime_error("Unknown member.");
         }
 
         Value EvaluateMember(ExecutionState &state,
@@ -331,6 +592,12 @@ namespace ForradiaLang
             if (const auto *variable = dynamic_cast<const VariableExpression *>(
                     expression.object.get()))
             {
+                if (state.groups.contains(variable->name))
+                {
+                    return LookupGroupMember(state, variable->name,
+                                             expression.memberName);
+                }
+
                 if (variable->name == "MouseButtons")
                 {
                     if (expression.memberName == "Left")
@@ -362,6 +629,12 @@ namespace ForradiaLang
 
             const Value object = Evaluate(state, *expression.object);
 
+            if (const auto *group = std::get_if<GroupRef>(&object))
+            {
+                return LookupGroupMember(state, group->name,
+                                         expression.memberName);
+            }
+
             if (const auto *point = std::get_if<Point>(&object))
             {
                 if (expression.memberName == "x")
@@ -372,6 +645,21 @@ namespace ForradiaLang
                 if (expression.memberName == "y")
                 {
                     return point->y;
+                }
+
+                throw std::runtime_error("Unknown member.");
+            }
+
+            if (const auto *size = std::get_if<Size>(&object))
+            {
+                if (expression.memberName == "width")
+                {
+                    return size->width;
+                }
+
+                if (expression.memberName == "height")
+                {
+                    return size->height;
                 }
 
                 throw std::runtime_error("Unknown member.");
@@ -416,14 +704,7 @@ namespace ForradiaLang
             if (const auto *variable =
                     dynamic_cast<const VariableExpression *>(&expression))
             {
-                const auto found = state.variables.find(variable->name);
-
-                if (found == state.variables.end())
-                {
-                    throw std::runtime_error("Unknown variable.");
-                }
-
-                return found->second;
+                return LookupName(state, variable->name);
             }
 
             if (const auto *binary =
@@ -442,6 +723,12 @@ namespace ForradiaLang
                     dynamic_cast<const MemberExpression *>(&expression))
             {
                 return EvaluateMember(state, *member);
+            }
+
+            if (const auto *index =
+                    dynamic_cast<const IndexExpression *>(&expression))
+            {
+                return EvaluateIndex(state, *index);
             }
 
             if (const auto *list =
@@ -721,6 +1008,101 @@ namespace ForradiaLang
             return ListRef{id};
         }
 
+        void ExpectElement(ExecutionState &state, const Value &value,
+                           const std::string &typeName)
+        {
+            if (typeName == "Int" || typeName == "Double")
+            {
+                if (!std::holds_alternative<double>(value))
+                {
+                    throw std::runtime_error("Expected a number.");
+                }
+
+                return;
+            }
+
+            if (typeName == "String")
+            {
+                if (!std::holds_alternative<std::string>(value))
+                {
+                    throw std::runtime_error("Expected a string.");
+                }
+
+                return;
+            }
+
+            if (typeName == "Point")
+            {
+                if (!std::holds_alternative<Point>(value))
+                {
+                    throw std::runtime_error("Expected a point.");
+                }
+
+                return;
+            }
+
+            if (typeName == "Size")
+            {
+                if (!std::holds_alternative<Size>(value))
+                {
+                    throw std::runtime_error("Expected a size.");
+                }
+
+                return;
+            }
+
+            if (Coloring::IsColorType(typeName))
+            {
+                if (!std::holds_alternative<Coloring::Color>(value))
+                {
+                    throw std::runtime_error("Expected a color.");
+                }
+
+                return;
+            }
+
+            if (IsListType(typeName))
+            {
+                const auto *list = std::get_if<ListRef>(&value);
+
+                if (list == nullptr)
+                {
+                    throw std::runtime_error("Expected a list.");
+                }
+
+                const auto found = state.lists.find(list->id);
+
+                if (found == state.lists.end() ||
+                    found->second.elementType != ListElementType(typeName))
+                {
+                    throw std::runtime_error("Expected a list.");
+                }
+
+                return;
+            }
+
+            const auto *instance = std::get_if<Object>(&value);
+
+            if (instance == nullptr || instance->className != typeName)
+            {
+                throw std::runtime_error("Expected an object.");
+            }
+        }
+
+        void AddElement(ExecutionState &state, const ListRef &list,
+                        Value element)
+        {
+            const auto found = state.lists.find(list.id);
+
+            if (found == state.lists.end())
+            {
+                throw std::runtime_error("Expected a list.");
+            }
+
+            ExpectElement(state, element, found->second.elementType);
+            found->second.elements.push_back(std::move(element));
+        }
+
         Value DefaultField(ExecutionState &state, const std::string &typeName)
         {
             if (typeName == "Int" || typeName == "Double")
@@ -736,6 +1118,11 @@ namespace ForradiaLang
             if (typeName == "Point")
             {
                 return Point{};
+            }
+
+            if (typeName == "Size")
+            {
+                return Size{};
             }
 
             if (Coloring::IsColorType(typeName))
@@ -770,6 +1157,16 @@ namespace ForradiaLang
                 if (!std::holds_alternative<Point>(value))
                 {
                     throw std::runtime_error("Expected a point.");
+                }
+
+                return value;
+            }
+
+            if (field.typeName == "Size")
+            {
+                if (!std::holds_alternative<Size>(value))
+                {
+                    throw std::runtime_error("Expected a size.");
                 }
 
                 return value;
@@ -852,6 +1249,331 @@ namespace ForradiaLang
             }
         }
 
+        struct Slot
+        {
+            Value *value{nullptr};
+            bool isConstant{false};
+        };
+
+        bool FieldIsConstant(const ExecutionState &state,
+                             const std::string &className,
+                             const std::string &fieldName)
+        {
+            const auto info = state.classes.find(className);
+
+            if (info == state.classes.end())
+            {
+                return false;
+            }
+
+            for (const auto &field : info->second.fields)
+            {
+                if (field.name == fieldName)
+                {
+                    return field.isConstant;
+                }
+            }
+
+            return false;
+        }
+
+        Slot FindBinding(ExecutionState &state, const std::string &name)
+        {
+            if (!state.currentGroup.empty())
+            {
+                const auto group = state.groups.find(state.currentGroup);
+
+                if (group != state.groups.end())
+                {
+                    const auto member = group->second.find(name);
+
+                    if (member != group->second.end())
+                    {
+                        const auto constants =
+                            state.groupConstants.find(state.currentGroup);
+                        const bool isConstant =
+                            constants != state.groupConstants.end() &&
+                            constants->second.contains(name);
+
+                        return Slot{&member->second, isConstant};
+                    }
+                }
+            }
+
+            const auto found = state.variables.find(name);
+
+            if (found != state.variables.end())
+            {
+                return Slot{&found->second, state.constants.contains(name)};
+            }
+
+            if (state.currentObjectId != 0)
+            {
+                const auto fields = state.objectFields.find(state.currentObjectId);
+
+                if (fields != state.objectFields.end())
+                {
+                    const auto field = fields->second.find(name);
+
+                    if (field != fields->second.end())
+                    {
+                        const auto className =
+                            state.objectClasses.find(state.currentObjectId);
+                        const bool isConstant =
+                            className != state.objectClasses.end() &&
+                            FieldIsConstant(state, className->second, name);
+
+                        return Slot{&field->second, isConstant};
+                    }
+                }
+            }
+
+            return {};
+        }
+
+        std::string GroupName(const ExecutionState &state,
+                              const Expression &expression)
+        {
+            if (const auto *variable =
+                    dynamic_cast<const VariableExpression *>(&expression))
+            {
+                if (state.groups.contains(variable->name))
+                {
+                    return variable->name;
+                }
+
+                return {};
+            }
+
+            if (const auto *member =
+                    dynamic_cast<const MemberExpression *>(&expression))
+            {
+                const std::string parent = GroupName(state, *member->object);
+
+                if (!parent.empty())
+                {
+                    const std::string nested =
+                        parent + "." + member->memberName;
+
+                    if (state.groups.contains(nested))
+                    {
+                        return nested;
+                    }
+                }
+            }
+
+            return {};
+        }
+
+        Slot GroupMemberSlot(ExecutionState &state, const std::string &groupName,
+                             const std::string &memberName)
+        {
+            const auto group = state.groups.find(groupName);
+
+            if (group == state.groups.end())
+            {
+                return {};
+            }
+
+            const auto member = group->second.find(memberName);
+
+            if (member == group->second.end())
+            {
+                return {};
+            }
+
+            const auto constants = state.groupConstants.find(groupName);
+            const bool isConstant = constants != state.groupConstants.end() &&
+                                    constants->second.contains(memberName);
+
+            return Slot{&member->second, isConstant};
+        }
+
+        Slot ResolveSlot(ExecutionState &state, const Expression &expression)
+        {
+            if (const auto *variable =
+                    dynamic_cast<const VariableExpression *>(&expression))
+            {
+                return FindBinding(state, variable->name);
+            }
+
+            if (const auto *member =
+                    dynamic_cast<const MemberExpression *>(&expression))
+            {
+                const std::string group = GroupName(state, *member->object);
+
+                if (!group.empty())
+                {
+                    return GroupMemberSlot(state, group, member->memberName);
+                }
+
+                const Slot parent = ResolveSlot(state, *member->object);
+
+                if (parent.value == nullptr)
+                {
+                    return {};
+                }
+
+                const auto *instance = std::get_if<Object>(parent.value);
+
+                if (instance == nullptr)
+                {
+                    return {};
+                }
+
+                const auto fields = state.objectFields.find(instance->id);
+
+                if (fields == state.objectFields.end())
+                {
+                    return {};
+                }
+
+                const auto field = fields->second.find(member->memberName);
+
+                if (field == fields->second.end())
+                {
+                    return {};
+                }
+
+                const bool isConstant =
+                    parent.isConstant ||
+                    FieldIsConstant(state, instance->className,
+                                    member->memberName);
+
+                return Slot{&field->second, isConstant};
+            }
+
+            return {};
+        }
+
+        void RejectConstant(bool isConstant)
+        {
+            if (isConstant)
+            {
+                throw std::runtime_error("Cannot change a constant.");
+            }
+        }
+
+        void AssignTo(ExecutionState &state, const Expression &target,
+                      Value value)
+        {
+            if (const auto *variable =
+                    dynamic_cast<const VariableExpression *>(&target))
+            {
+                const Slot slot = FindBinding(state, variable->name);
+
+                if (slot.value == nullptr)
+                {
+                    throw std::runtime_error("Unknown variable.");
+                }
+
+                RejectConstant(slot.isConstant);
+                *slot.value = std::move(value);
+                return;
+            }
+
+            if (const auto *member =
+                    dynamic_cast<const MemberExpression *>(&target))
+            {
+                const std::string group = GroupName(state, *member->object);
+
+                if (!group.empty())
+                {
+                    const Slot slot =
+                        GroupMemberSlot(state, group, member->memberName);
+
+                    if (slot.value == nullptr)
+                    {
+                        throw std::runtime_error("Unknown member.");
+                    }
+
+                    RejectConstant(slot.isConstant);
+                    *slot.value = std::move(value);
+                    return;
+                }
+
+                const Slot parent = ResolveSlot(state, *member->object);
+
+                if (parent.value == nullptr)
+                {
+                    throw std::runtime_error("Cannot assign.");
+                }
+
+                if (auto *size = std::get_if<Size>(parent.value))
+                {
+                    if (member->memberName != "width" &&
+                        member->memberName != "height")
+                    {
+                        throw std::runtime_error("Unknown member.");
+                    }
+
+                    RejectConstant(parent.isConstant);
+
+                    if (member->memberName == "width")
+                    {
+                        size->width = AsNumber(value);
+                    }
+                    else
+                    {
+                        size->height = AsNumber(value);
+                    }
+
+                    return;
+                }
+
+                if (auto *point = std::get_if<Point>(parent.value))
+                {
+                    if (member->memberName != "x" && member->memberName != "y")
+                    {
+                        throw std::runtime_error("Unknown member.");
+                    }
+
+                    RejectConstant(parent.isConstant);
+
+                    if (member->memberName == "x")
+                    {
+                        point->x = AsNumber(value);
+                    }
+                    else
+                    {
+                        point->y = AsNumber(value);
+                    }
+
+                    return;
+                }
+
+                const auto *instance = std::get_if<Object>(parent.value);
+
+                if (instance != nullptr)
+                {
+                    const auto fields = state.objectFields.find(instance->id);
+
+                    if (fields == state.objectFields.end())
+                    {
+                        throw std::runtime_error("Unknown member.");
+                    }
+
+                    const auto field = fields->second.find(member->memberName);
+
+                    if (field == fields->second.end())
+                    {
+                        throw std::runtime_error("Unknown member.");
+                    }
+
+                    RejectConstant(
+                        parent.isConstant ||
+                        FieldIsConstant(state, instance->className,
+                                        member->memberName));
+                    field->second = std::move(value);
+                    return;
+                }
+
+                throw std::runtime_error("Cannot assign.");
+            }
+
+            throw std::runtime_error("Cannot assign.");
+        }
+
         void ExecuteStatement(ExecutionState &state, const Statement &statement)
         {
             if (const auto *declaration =
@@ -865,7 +1587,22 @@ namespace ForradiaLang
                     throw std::runtime_error("Expected a point.");
                 }
 
-                state.variables[declaration->name] = std::move(value);
+                if (declaration->typeName == "Size" &&
+                    !std::holds_alternative<Size>(value))
+                {
+                    throw std::runtime_error("Expected a size.");
+                }
+
+                DefineName(state, declaration->name, std::move(value),
+                           declaration->isConstant);
+                return;
+            }
+
+            if (const auto *assignment =
+                    dynamic_cast<const AssignmentStatement *>(&statement))
+            {
+                AssignTo(state, *assignment->target,
+                         Evaluate(state, *assignment->value));
                 return;
             }
 
@@ -874,6 +1611,11 @@ namespace ForradiaLang
             {
                 const double start = AsNumber(Evaluate(state, *loop->start));
                 const double end = AsNumber(Evaluate(state, *loop->end));
+
+                if (NameIsConstant(state, loop->name))
+                {
+                    throw std::runtime_error("Cannot change a constant.");
+                }
 
                 for (double value = start; value <= end; value += 1.0)
                 {
@@ -957,15 +1699,25 @@ namespace ForradiaLang
                     const double alpha =
                         AsNumber(Evaluate(state, *object->arguments[3]));
 
-                    state.variables[object->name] =
-                        Coloring::Color{red, green, blue, alpha};
+                    DefineName(state, object->name,
+                               Coloring::Color{red, green, blue, alpha},
+                               object->isConstant);
                     return;
                 }
 
                 if (object->typeName == "Point")
                 {
-                    state.variables[object->name] =
-                        MakePoint(state, object->arguments);
+                    DefineName(state, object->name,
+                               MakePoint(state, object->arguments),
+                               object->isConstant);
+                    return;
+                }
+
+                if (object->typeName == "Size")
+                {
+                    DefineName(state, object->name,
+                               MakeSize(state, object->arguments),
+                               object->isConstant);
                     return;
                 }
 
@@ -976,8 +1728,8 @@ namespace ForradiaLang
                         throw std::runtime_error("Unexpected arguments.");
                     }
 
-                    state.variables[object->name] =
-                        SceneObject{object->typeName};
+                    DefineName(state, object->name, SceneObject{object->typeName},
+                               object->isConstant);
                     return;
                 }
 
@@ -993,22 +1745,65 @@ namespace ForradiaLang
                     throw std::runtime_error("Unexpected arguments.");
                 }
 
-                state.variables[object->name] =
-                    MakeInstance(state, object->typeName);
+                DefineName(state, object->name,
+                           MakeInstance(state, object->typeName),
+                           object->isConstant);
+                return;
+            }
+
+            if (const auto *group =
+                    dynamic_cast<const GroupDeclaration *>(&statement))
+            {
+                const std::string previousGroup = state.currentGroup;
+
+                if (previousGroup.empty())
+                {
+                    state.currentGroup = group->name;
+                }
+                else
+                {
+                    state.currentGroup = previousGroup + "." + group->name;
+                }
+
+                state.groups.try_emplace(state.currentGroup);
+
+                try
+                {
+                    ExecuteBlock(state, group->body);
+                }
+                catch (...)
+                {
+                    state.currentGroup = previousGroup;
+                    throw;
+                }
+
+                state.currentGroup = previousGroup;
                 return;
             }
 
             if (const auto *method =
                     dynamic_cast<const MethodCall *>(&statement))
             {
-                const auto variable = state.variables.find(method->objectName);
+                const Value receiver = Evaluate(state, *method->object);
 
-                if (variable == state.variables.end())
+                if (const auto *list = std::get_if<ListRef>(&receiver))
                 {
-                    throw std::runtime_error("Unknown variable.");
+                    if (method->methodName != "Add")
+                    {
+                        throw std::runtime_error("Unknown method.");
+                    }
+
+                    if (method->arguments.size() != 1)
+                    {
+                        throw std::runtime_error("Expected one argument.");
+                    }
+
+                    AddElement(state, *list,
+                               Evaluate(state, *method->arguments[0]));
+                    return;
                 }
 
-                const auto *instance = std::get_if<Object>(&variable->second);
+                const auto *instance = std::get_if<Object>(&receiver);
 
                 if (instance == nullptr)
                 {
@@ -1030,7 +1825,25 @@ namespace ForradiaLang
                     throw std::runtime_error("Unknown method.");
                 }
 
-                ExecuteBlock(state, found->second->body);
+                const FunctionDeclaration *function = found->second;
+                const int previousObject = state.currentObjectId;
+                const std::string previousGroup = state.currentGroup;
+                state.currentObjectId = instance->id;
+                state.currentGroup.clear();
+
+                try
+                {
+                    ExecuteBlock(state, function->body);
+                }
+                catch (...)
+                {
+                    state.currentObjectId = previousObject;
+                    state.currentGroup = previousGroup;
+                    throw;
+                }
+
+                state.currentObjectId = previousObject;
+                state.currentGroup = previousGroup;
                 return;
             }
 
@@ -1110,7 +1923,20 @@ namespace ForradiaLang
                     throw std::runtime_error("Unknown function.");
                 }
 
-                ExecuteBlock(state, found->second->body);
+                const std::string previousGroup = state.currentGroup;
+                state.currentGroup.clear();
+
+                try
+                {
+                    ExecuteBlock(state, found->second->body);
+                }
+                catch (...)
+                {
+                    state.currentGroup = previousGroup;
+                    throw;
+                }
+
+                state.currentGroup = previousGroup;
                 return;
             }
 
@@ -1142,8 +1968,14 @@ namespace ForradiaLang
 
                     for (const auto &field : declaration->fields)
                     {
-                        info.fields.push_back(FieldInfo{
-                            field.typeName, field.name, field.value.get()});
+                        info.fields.push_back(FieldInfo{field.typeName, field.name,
+                                                             field.value.get(),
+                                                             field.isConstant});
+                    }
+
+                    if (declaration->hasConstructor)
+                    {
+                        info.constructor = &declaration->constructor;
                     }
 
                     state.classes[declaration->name] = std::move(info);
@@ -1229,6 +2061,11 @@ namespace ForradiaLang
 
             if (hasParameter)
             {
+                if (NameIsConstant(state, parameter))
+                {
+                    throw std::runtime_error("Cannot change a constant.");
+                }
+
                 state.variables[parameter] = static_cast<double>(button);
             }
 
@@ -1274,6 +2111,11 @@ namespace ForradiaLang
 
             if (hasParameter)
             {
+                if (NameIsConstant(state, parameter))
+                {
+                    throw std::runtime_error("Cannot change a constant.");
+                }
+
                 state.variables[parameter] = static_cast<double>(key);
             }
 
