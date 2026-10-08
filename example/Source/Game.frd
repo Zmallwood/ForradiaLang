@@ -1,12 +1,8 @@
 ' Copyright (c) 2026 Andreas Åkerberg
 ' SPDX-License-Identifier: MIT
 
-Import Scenes.IntroScene
-Import Scenes.MainMenuScene
-
-Fn SayHello
-    Print "Hello!"
-End
+Import Scenes.Intro.IntroScene
+Import Scenes.MainMenu.MainMenuScene
 
 Class Game
     Fn Start

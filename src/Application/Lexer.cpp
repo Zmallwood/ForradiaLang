@@ -37,6 +37,11 @@ namespace ForradiaLang
                 return TokenTypes::Else;
             }
 
+            if (word == "ElseIf")
+            {
+                return TokenTypes::ElseIf;
+            }
+
             if (word == "End")
             {
                 return TokenTypes::End;
@@ -80,6 +85,16 @@ namespace ForradiaLang
             if (word == "Draw")
             {
                 return TokenTypes::Draw;
+            }
+
+            if (word == "OnMouseDown")
+            {
+                return TokenTypes::OnMouseDown;
+            }
+
+            if (word == "OnKeyDown")
+            {
+                return TokenTypes::OnKeyDown;
             }
 
             return TokenTypes::Identifier;
@@ -194,6 +209,14 @@ namespace ForradiaLang
                     ++index;
                 }
 
+                continue;
+            }
+
+            if (character == '=' && index + 1 < source.size() &&
+                source[index + 1] == '=')
+            {
+                tokens.push_back({TokenTypes::Equals, "=="});
+                index += 2;
                 continue;
             }
 

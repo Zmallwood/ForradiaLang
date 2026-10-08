@@ -2,6 +2,7 @@
 #include "Expressions/BinaryExpression.hpp"
 #include "Expressions/CallExpression.hpp"
 #include "Expressions/ListExpression.hpp"
+#include "Expressions/MemberExpression.hpp"
 #include "Expressions/NumberExpression.hpp"
 #include "Expressions/StringExpression.hpp"
 #include "Expressions/VariableExpression.hpp"
@@ -183,6 +184,19 @@ namespace ForradiaLang
                     return expression;
                 }
 
+                if (!AtEnd(state) && Peek(state).type == TokenTypes::Dot)
+                {
+                    Advance(state);
+
+                    auto expression = std::make_unique<MemberExpression>();
+                    expression->objectName = token.value;
+                    expression->memberName =
+                        Expect(state, TokenTypes::Identifier,
+                               "Expected a name.")
+                            .value;
+                    return expression;
+                }
+
                 auto expression = std::make_unique<VariableExpression>();
                 expression->name = token.value;
                 return expression;
@@ -340,7 +354,8 @@ namespace ForradiaLang
                     break;
                 }
 
-                if (stopAtElse && type == TokenTypes::Else)
+                if (stopAtElse && (type == TokenTypes::Else ||
+                                   type == TokenTypes::ElseIf))
                 {
                     break;
                 }
@@ -374,21 +389,41 @@ namespace ForradiaLang
             return statement;
         }
 
+        void ParseIfCondition(ParseState &state, IfStatement &statement)
+        {
+            statement.condition = ParseExpression(state);
+
+            if (!AtEnd(state) && Peek(state).type == TokenTypes::Then)
+            {
+                Advance(state);
+            }
+
+            statement.thenBranch = ParseBlock(state, true);
+        }
+
         std::unique_ptr<Statement> ParseIfStatement(ParseState &state)
         {
             Advance(state);
 
             auto statement = std::make_unique<IfStatement>();
-            statement->condition = ParseExpression(state);
+            IfStatement *current = statement.get();
+            ParseIfCondition(state, *current);
 
-            Expect(state, TokenTypes::Then, "Expected 'Then'.");
+            while (!AtEnd(state) && Peek(state).type == TokenTypes::ElseIf)
+            {
+                Advance(state);
 
-            statement->thenBranch = ParseBlock(state, true);
+                auto nested = std::make_unique<IfStatement>();
+                IfStatement *nestedIf = nested.get();
+                ParseIfCondition(state, *nestedIf);
+                current->elseBranch.push_back(std::move(nested));
+                current = nestedIf;
+            }
 
             if (!AtEnd(state) && Peek(state).type == TokenTypes::Else)
             {
                 Advance(state);
-                statement->elseBranch = ParseBlock(state, false);
+                current->elseBranch = ParseBlock(state, false);
             }
 
             Expect(state, TokenTypes::End, "Expected 'End'.");
@@ -560,6 +595,70 @@ namespace ForradiaLang
                 {
                     Advance(state);
                     declaration->draw = ParseBlock(state, false);
+                    Expect(state, TokenTypes::End, "Expected 'End'.");
+                    continue;
+                }
+
+                if (Peek(state).type == TokenTypes::OnMouseDown)
+                {
+                    Advance(state);
+
+                    if (!AtEnd(state) &&
+                        Peek(state).type == TokenTypes::LeftParen)
+                    {
+                        Advance(state);
+
+                        const std::string typeName =
+                            Expect(state, TokenTypes::Identifier,
+                                   "Expected a type.")
+                                .value;
+
+                        if (typeName != "MouseButtons")
+                        {
+                            throw std::runtime_error("Unknown type.");
+                        }
+
+                        declaration->onMouseDownParameter =
+                            Expect(state, TokenTypes::Identifier,
+                                   "Expected a name.")
+                                .value;
+
+                        Expect(state, TokenTypes::RightParen, "Expected ')'.");
+                    }
+
+                    declaration->onMouseDown = ParseBlock(state, false);
+                    Expect(state, TokenTypes::End, "Expected 'End'.");
+                    continue;
+                }
+
+                if (Peek(state).type == TokenTypes::OnKeyDown)
+                {
+                    Advance(state);
+
+                    if (!AtEnd(state) &&
+                        Peek(state).type == TokenTypes::LeftParen)
+                    {
+                        Advance(state);
+
+                        const std::string typeName =
+                            Expect(state, TokenTypes::Identifier,
+                                   "Expected a type.")
+                                .value;
+
+                        if (typeName != "Keys")
+                        {
+                            throw std::runtime_error("Unknown type.");
+                        }
+
+                        declaration->onKeyDownParameter =
+                            Expect(state, TokenTypes::Identifier,
+                                   "Expected a name.")
+                                .value;
+
+                        Expect(state, TokenTypes::RightParen, "Expected ')'.");
+                    }
+
+                    declaration->onKeyDown = ParseBlock(state, false);
                     Expect(state, TokenTypes::End, "Expected 'End'.");
                     continue;
                 }

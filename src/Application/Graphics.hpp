@@ -32,7 +32,9 @@ namespace ForradiaLang
                         int fontSize, bool centered);
 
         void RunUntilClosed(const std::function<void()> &update,
-                            const std::function<void()> &draw);
+                            const std::function<void()> &draw,
+                            const std::function<void(int)> &onMouseDown,
+                            const std::function<void(int)> &onKeyDown);
 
         void Shutdown();
     }

@@ -6,6 +6,14 @@ Scene IntroScene
         ' Print "Test"
     End
 
+    OnMouseDown(MouseButtons button)
+        GoToScene "MainMenuScene"
+    End
+
+    OnKeyDown(Keys key)
+        GoToScene "MainMenuScene"
+    End
+
     Draw
         DrawImage "DefaultSceneBackground" 0.0 0.0 1.0 1.0
 

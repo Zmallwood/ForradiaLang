@@ -23,6 +23,7 @@ namespace ForradiaLang
         If,
         Then,
         Else,
+        ElseIf,
         End,
         Print,
         Int,
@@ -31,6 +32,8 @@ namespace ForradiaLang
         Import,
         Scene,
         Update,
-        Draw
+        Draw,
+        OnMouseDown,
+        OnKeyDown
     };
 }

@@ -6,6 +6,7 @@
 #include "Expressions/BinaryExpression.hpp"
 #include "Expressions/CallExpression.hpp"
 #include "Expressions/ListExpression.hpp"
+#include "Expressions/MemberExpression.hpp"
 #include "Expressions/NumberExpression.hpp"
 #include "Expressions/StringExpression.hpp"
 #include "Expressions/VariableExpression.hpp"
@@ -46,6 +47,11 @@ namespace ForradiaLang
         {
             const std::vector<std::unique_ptr<Statement>> *update{nullptr};
             const std::vector<std::unique_ptr<Statement>> *draw{nullptr};
+            const std::vector<std::unique_ptr<Statement>> *onMouseDown{
+                nullptr};
+            const std::vector<std::unique_ptr<Statement>> *onKeyDown{nullptr};
+            std::string onMouseDownParameter;
+            std::string onKeyDownParameter;
         };
 
         using Value = std::variant<double, std::string, Object, Coloring::Color,
@@ -189,6 +195,35 @@ namespace ForradiaLang
             throw std::runtime_error("Unknown function.");
         }
 
+        Value EvaluateMember(const MemberExpression &expression)
+        {
+            if (expression.objectName == "MouseButtons")
+            {
+                if (expression.memberName == "Left")
+                {
+                    return static_cast<double>(SDL_BUTTON_LEFT);
+                }
+
+                if (expression.memberName == "Right")
+                {
+                    return static_cast<double>(SDL_BUTTON_RIGHT);
+                }
+            }
+
+            if (expression.objectName == "Keys" &&
+                expression.memberName.size() == 1)
+            {
+                const char letter = expression.memberName[0];
+
+                if (letter >= 'A' && letter <= 'Z')
+                {
+                    return static_cast<double>(SDLK_a + (letter - 'A'));
+                }
+            }
+
+            throw std::runtime_error("Unknown member.");
+        }
+
         Value Evaluate(ExecutionState &state, const Expression &expression)
         {
             if (const auto *number =
@@ -226,6 +261,12 @@ namespace ForradiaLang
                     dynamic_cast<const CallExpression *>(&expression))
             {
                 return EvaluateCall(state, *call);
+            }
+
+            if (const auto *member =
+                    dynamic_cast<const MemberExpression *>(&expression))
+            {
+                return EvaluateMember(*member);
             }
 
             if (const auto *list =
@@ -670,8 +711,10 @@ namespace ForradiaLang
                 if (const auto *scene =
                         dynamic_cast<const SceneDeclaration *>(statement.get()))
                 {
-                    state.sceneTypes[scene->name] =
-                        SceneType{&scene->update, &scene->draw};
+                    state.sceneTypes[scene->name] = SceneType{
+                        &scene->update, &scene->draw, &scene->onMouseDown,
+                        &scene->onKeyDown, scene->onMouseDownParameter,
+                        scene->onKeyDownParameter};
                 }
             }
         }
@@ -712,6 +755,96 @@ namespace ForradiaLang
 
             ExecuteBlock(state, *found->second.draw);
         }
+
+        void RunSceneMouseDown(ExecutionState &state, int button)
+        {
+            if (state.currentSceneType.empty())
+            {
+                return;
+            }
+
+            const auto found = state.sceneTypes.find(state.currentSceneType);
+
+            if (found == state.sceneTypes.end() ||
+                found->second.onMouseDown == nullptr)
+            {
+                return;
+            }
+
+            const std::string &parameter = found->second.onMouseDownParameter;
+            const bool hasParameter = !parameter.empty();
+            const bool hadVariable =
+                hasParameter && state.variables.contains(parameter);
+            Value previous;
+
+            if (hadVariable)
+            {
+                previous = state.variables[parameter];
+            }
+
+            if (hasParameter)
+            {
+                state.variables[parameter] = static_cast<double>(button);
+            }
+
+            ExecuteBlock(state, *found->second.onMouseDown);
+
+            if (hadVariable)
+            {
+                state.variables[parameter] = previous;
+            }
+            else if (hasParameter)
+            {
+                state.variables.erase(parameter);
+            }
+
+            std::cout.flush();
+        }
+
+        void RunSceneKeyDown(ExecutionState &state, int key)
+        {
+            if (state.currentSceneType.empty())
+            {
+                return;
+            }
+
+            const auto found = state.sceneTypes.find(state.currentSceneType);
+
+            if (found == state.sceneTypes.end() ||
+                found->second.onKeyDown == nullptr)
+            {
+                return;
+            }
+
+            const std::string &parameter = found->second.onKeyDownParameter;
+            const bool hasParameter = !parameter.empty();
+            const bool hadVariable =
+                hasParameter && state.variables.contains(parameter);
+            Value previous;
+
+            if (hadVariable)
+            {
+                previous = state.variables[parameter];
+            }
+
+            if (hasParameter)
+            {
+                state.variables[parameter] = static_cast<double>(key);
+            }
+
+            ExecuteBlock(state, *found->second.onKeyDown);
+
+            if (hadVariable)
+            {
+                state.variables[parameter] = previous;
+            }
+            else if (hasParameter)
+            {
+                state.variables.erase(parameter);
+            }
+
+            std::cout.flush();
+        }
     }
 
     void Interpreter::Execute(
@@ -736,7 +869,10 @@ namespace ForradiaLang
         RegisterFunctions(state, statements);
         ExecuteBlock(state, statements);
         std::cout.flush();
-        Graphics::RunUntilClosed([&state]() { RunSceneUpdate(state); },
-                                 [&state]() { RunSceneDraw(state); });
+        Graphics::RunUntilClosed(
+            [&state]() { RunSceneUpdate(state); },
+            [&state]() { RunSceneDraw(state); },
+            [&state](int button) { RunSceneMouseDown(state, button); },
+            [&state](int key) { RunSceneKeyDown(state, key); });
     }
 }

@@ -11,8 +11,6 @@ Else
      Print "Mindre än"
 End
 
-SayHello
-
 Game game
 
 game.Start

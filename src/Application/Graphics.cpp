@@ -1,6 +1,7 @@
 #include "Graphics.hpp"
 
 #include <filesystem>
+#include <unordered_set>
 
 namespace ForradiaLang
 {
@@ -530,7 +531,9 @@ namespace ForradiaLang
     }
 
     void Graphics::RunUntilClosed(const std::function<void()> &update,
-                                  const std::function<void()> &draw)
+                                  const std::function<void()> &draw,
+                                  const std::function<void(int)> &onMouseDown,
+                                  const std::function<void(int)> &onKeyDown)
     {
         if (window == nullptr)
         {
@@ -538,6 +541,7 @@ namespace ForradiaLang
         }
 
         bool running = true;
+        std::unordered_set<SDL_Keycode> pressedKeys;
 
         while (running)
         {
@@ -547,11 +551,44 @@ namespace ForradiaLang
             {
                 if (event.type == SDL_QUIT ||
                     (event.type == SDL_WINDOWEVENT &&
-                     event.window.event == SDL_WINDOWEVENT_CLOSE) ||
-                    (event.type == SDL_KEYDOWN &&
-                     event.key.keysym.sym == SDLK_ESCAPE))
+                     event.window.event == SDL_WINDOWEVENT_CLOSE))
                 {
                     running = false;
+                }
+                else if (event.type == SDL_WINDOWEVENT &&
+                         event.window.event == SDL_WINDOWEVENT_FOCUS_LOST)
+                {
+                    pressedKeys.clear();
+                }
+                else if (event.type == SDL_MOUSEBUTTONDOWN)
+                {
+                    if (onMouseDown)
+                    {
+                        onMouseDown(static_cast<int>(event.button.button));
+                    }
+                }
+                else if (event.type == SDL_KEYDOWN)
+                {
+                    const SDL_Keycode key = event.key.keysym.sym;
+
+                    if (!pressedKeys.contains(key))
+                    {
+                        pressedKeys.insert(key);
+
+                        if (onKeyDown)
+                        {
+                            onKeyDown(static_cast<int>(key));
+                        }
+                    }
+
+                    if (key == SDLK_ESCAPE)
+                    {
+                        running = false;
+                    }
+                }
+                else if (event.type == SDL_KEYUP)
+                {
+                    pressedKeys.erase(event.key.keysym.sym);
                 }
             }
 
