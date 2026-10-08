@@ -185,6 +185,47 @@ namespace ForradiaLang
                 continue;
             }
 
+            if (character == '_' &&
+                (index + 1 >= source.size() ||
+                 !(IsAlpha(source[index + 1]) || IsDigit(source[index + 1]) ||
+                   source[index + 1] == '_')))
+            {
+                std::size_t lookAhead = index + 1;
+
+                while (lookAhead < source.size() && IsSpace(source[lookAhead]))
+                {
+                    ++lookAhead;
+                }
+
+                if (lookAhead < source.size() && source[lookAhead] == '\'')
+                {
+                    while (lookAhead < source.size() &&
+                           source[lookAhead] != '\r' &&
+                           source[lookAhead] != '\n')
+                    {
+                        ++lookAhead;
+                    }
+                }
+
+                if (lookAhead < source.size() &&
+                    (source[lookAhead] == '\r' || source[lookAhead] == '\n'))
+                {
+                    index = lookAhead;
+
+                    if (source[index] == '\r' && index + 1 < source.size() &&
+                        source[index + 1] == '\n')
+                    {
+                        index += 2;
+                    }
+                    else
+                    {
+                        ++index;
+                    }
+
+                    continue;
+                }
+            }
+
             if (character == '\'')
             {
                 while (index < source.size() && source[index] != '\r' &&

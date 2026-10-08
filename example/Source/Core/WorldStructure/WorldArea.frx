@@ -2,15 +2,18 @@
 ' SPDX-License-Identifier: MIT
 
 Import Tile
+Import Core.Configuration.GameProperties
 
 Class WorldArea
     List<List<Tile>> tiles
 
     New
-        For x = 0 To 99
+        Size size = GameProperties.kWorldAreaSize
+
+        For x = 0 To size.width - 1
             tiles.Add(List<Tile>())
 
-            For y = 0 To 99
+            For y = 0 To size.height - 1
                 tiles[x].Add(Tile())
             Next
         Next

@@ -1,8 +1,11 @@
 ' Copyright (c) 2026 Andreas Åkerberg
 ' SPDX-License-Identifier: MIT
 
+Import Core.Configuration.GameProperties
+
 Class Player
-    Point position = Point(50, 50)
+    Point position = Point(GameProperties.kWorldAreaSize.width / 2, _
+                            GameProperties.kWorldAreaSize.height / 2)
 End
 
 Player gPlayer

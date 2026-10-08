@@ -16,7 +16,10 @@ Class WorldView
                 Int xCoordinate = playerPosition.x - 5 + x
                 Int yCoordinate = playerPosition.y - 5 + y
 
-                If xCoordinate < 0 Or yCoordinate < 0 Or xCoordinate >= 100 Or yCoordinate >= 100 Then
+                If xCoordinate < 0 Or _
+                    yCoordinate < 0 Or _ 
+                    xCoordinate >= 100 Or _
+                    yCoordinate >= 100 Then
                     Continue
                 End
 
