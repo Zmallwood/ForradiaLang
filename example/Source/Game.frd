@@ -3,6 +3,8 @@
 
 Import Scenes.Intro.IntroScene
 Import Scenes.MainMenu.MainMenuScene
+Import Scenes.WorldGeneration.WorldGenerationScene
+Import Scenes.Main.MainScene
 
 Class Game
     Fn Start
@@ -22,9 +24,13 @@ Class Game
 
         IntroScene introScene
         MainMenuScene mainMenuScene
+        WorldGenerationScene worldGenerationScene
+        MainScene mainScene
 
         AddScene "IntroScene" introScene
         AddScene "MainMenuScene" mainMenuScene
+        AddScene "WorldGenerationScene" worldGenerationScene
+        AddScene "MainScene" mainScene
 
         GoToScene "IntroScene"
     End

@@ -1,0 +1,10 @@
+' Copyright (c) 2026 Andreas Åkerberg
+' SPDX-License-Identifier: MIT
+
+Scene MainScene
+    Update
+    End
+
+    Draw
+    End
+End
