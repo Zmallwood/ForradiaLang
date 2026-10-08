@@ -383,6 +383,33 @@ namespace ForradiaLang
             Graphics::AddFontSizes(fontSizes);
         }
 
+        void AddCursorStyle(ExecutionState &state, const FunctionCall &call)
+        {
+            if (call.arguments.size() != 2)
+            {
+                throw std::runtime_error("Expected two arguments.");
+            }
+
+            const std::string styleName =
+                AsString(Evaluate(state, *call.arguments[0]));
+            const std::string imageName =
+                AsString(Evaluate(state, *call.arguments[1]));
+
+            Graphics::AddCursorStyle(styleName, imageName);
+        }
+
+        void SetDefaultCursorStyle(ExecutionState &state,
+                                   const FunctionCall &call)
+        {
+            if (call.arguments.size() != 1)
+            {
+                throw std::runtime_error("Expected one argument.");
+            }
+
+            Graphics::SetDefaultCursorStyle(
+                AsString(Evaluate(state, *call.arguments[0])));
+        }
+
         void DrawImage(ExecutionState &state, const FunctionCall &call)
         {
             if (call.arguments.size() != 5)
@@ -641,6 +668,18 @@ namespace ForradiaLang
                 if (call->name == "AddFontSizes")
                 {
                     AddFontSizes(state, *call);
+                    return;
+                }
+
+                if (call->name == "AddCursorStyle")
+                {
+                    AddCursorStyle(state, *call);
+                    return;
+                }
+
+                if (call->name == "SetDefaultCursorStyle")
+                {
+                    SetDefaultCursorStyle(state, *call);
                     return;
                 }
 

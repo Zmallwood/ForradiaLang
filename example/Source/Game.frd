@@ -8,8 +8,6 @@ Import Scenes.Main.MainScene
 
 Class Game
     Fn Start
-        Print "Starting game"
-
         InitializeGraphics 0, 0, 0, 0, FRD_Fullscreen, "Forradia"
 
         LoadImages "../Resources/Images"
@@ -21,6 +19,11 @@ Class Game
         Color clearColor(0.0, 0.5, 1.0, 1.0)
 
         SetClearColor clearColor
+
+        AddCursorStyle "Default", "CursorDefault"
+        AddCursorStyle "Hovering", "CursorHovering"
+
+        SetDefaultCursorStyle "Default"
 
         IntroScene introScene
         MainMenuScene mainMenuScene

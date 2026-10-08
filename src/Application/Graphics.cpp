@@ -2,6 +2,11 @@
 
 #include <filesystem>
 #include <unordered_set>
+#include <vector>
+
+#ifdef _WIN32
+#include <SDL2/SDL_syswm.h>
+#endif
 
 namespace ForradiaLang
 {
@@ -17,9 +22,44 @@ namespace ForradiaLang
         bool textSupportReady = false;
         std::string imagesDirectory;
         std::string fontFile;
+        struct CursorStyle
+        {
+            std::string imageName;
+            int hotspotX{0};
+            int hotspotY{0};
+        };
+
         std::unordered_map<std::string, SDL_Texture *> images;
         std::unordered_map<std::string, SDL_Texture *> textImages;
+        std::unordered_map<std::string, CursorStyle> cursorStyles;
         std::unordered_map<int, TTF_Font *> fonts;
+        std::string defaultCursorStyle;
+        int confinedCursorWidth = 0;
+        int confinedCursorHeight = 0;
+        SDL_Cursor *blankSdlCursor = nullptr;
+#ifdef _WIN32
+        HCURSOR blankWinCursor = nullptr;
+        HWND cursorHookWindow = nullptr;
+        WNDPROC originalCursorProc = nullptr;
+
+        LRESULT CALLBACK SuppressSystemCursorProc(HWND hwnd, UINT message,
+                                                  WPARAM wParam, LPARAM lParam)
+        {
+            if (message == WM_SETCURSOR && blankWinCursor != nullptr)
+            {
+                SetCursor(blankWinCursor);
+                return TRUE;
+            }
+
+            if (originalCursorProc == nullptr)
+            {
+                return DefWindowProc(hwnd, message, wParam, lParam);
+            }
+
+            return CallWindowProc(originalCursorProc, hwnd, message, wParam,
+                                  lParam);
+        }
+#endif
 
         Uint8 ToChannel(double value)
         {
@@ -210,8 +250,397 @@ namespace ForradiaLang
             return LoadImageFile(key, ImageFile(name));
         }
 
+        bool CursorHotspot(SDL_Surface *surface, int &hotspotX, int &hotspotY)
+        {
+            SDL_Surface *converted =
+                SDL_ConvertSurfaceFormat(surface, SDL_PIXELFORMAT_RGBA32, 0);
+
+            if (converted == nullptr)
+            {
+                return false;
+            }
+
+            if (converted->format->BytesPerPixel != 4 ||
+                SDL_LockSurface(converted) != 0)
+            {
+                SDL_FreeSurface(converted);
+                return false;
+            }
+
+            hotspotX = 0;
+            hotspotY = 0;
+
+            for (int y = 0; y < converted->h; ++y)
+            {
+                const auto *row =
+                    static_cast<const Uint8 *>(converted->pixels) +
+                    static_cast<std::size_t>(y) * converted->pitch;
+                int minX = converted->w;
+                int maxX = -1;
+
+                for (int x = 0; x < converted->w; ++x)
+                {
+                    if (row[static_cast<std::size_t>(x) * 4 + 3] > 16)
+                    {
+                        if (x < minX)
+                        {
+                            minX = x;
+                        }
+
+                        if (x > maxX)
+                        {
+                            maxX = x;
+                        }
+                    }
+                }
+
+                if (maxX >= 0)
+                {
+                    hotspotX = (minX + maxX) / 2;
+                    hotspotY = y;
+                    break;
+                }
+            }
+
+            SDL_UnlockSurface(converted);
+            SDL_FreeSurface(converted);
+            return true;
+        }
+
+        bool ClipCursorRect(SDL_Rect &source, SDL_Rect &destination,
+                            int canvasWidth, int canvasHeight)
+        {
+            if (destination.x < 0)
+            {
+                source.x -= destination.x;
+                source.w += destination.x;
+                destination.w += destination.x;
+                destination.x = 0;
+            }
+
+            if (destination.y < 0)
+            {
+                source.y -= destination.y;
+                source.h += destination.y;
+                destination.h += destination.y;
+                destination.y = 0;
+            }
+
+            if (destination.x + destination.w > canvasWidth)
+            {
+                const int overflow =
+                    destination.x + destination.w - canvasWidth;
+                source.w -= overflow;
+                destination.w -= overflow;
+            }
+
+            if (destination.y + destination.h > canvasHeight)
+            {
+                const int overflow =
+                    destination.y + destination.h - canvasHeight;
+                source.h -= overflow;
+                destination.h -= overflow;
+            }
+
+            return source.w > 0 && source.h > 0 && destination.w > 0 &&
+                   destination.h > 0 && destination.x < canvasWidth &&
+                   destination.y < canvasHeight;
+        }
+
+        void EnsureBlankCursors()
+        {
+            if (blankSdlCursor == nullptr)
+            {
+                SDL_Surface *surface = SDL_CreateRGBSurfaceWithFormat(
+                    0, 32, 32, 32, SDL_PIXELFORMAT_RGBA32);
+
+                if (surface != nullptr)
+                {
+                    if (SDL_LockSurface(surface) == 0)
+                    {
+                        SDL_memset(surface->pixels, 0,
+                                   surface->pitch * surface->h);
+                        SDL_UnlockSurface(surface);
+                    }
+
+                    blankSdlCursor = SDL_CreateColorCursor(surface, 0, 0);
+                    SDL_FreeSurface(surface);
+                }
+            }
+
+#ifdef _WIN32
+            if (blankWinCursor == nullptr)
+            {
+                const int width = GetSystemMetrics(SM_CXCURSOR);
+                const int height = GetSystemMetrics(SM_CYCURSOR);
+
+                if (width > 0 && height > 0)
+                {
+                    const int stride = (width + 7) / 8;
+                    std::vector<BYTE> andMask(
+                        static_cast<std::size_t>(stride) * height, 0xFF);
+                    std::vector<BYTE> xorMask(
+                        static_cast<std::size_t>(stride) * height, 0x00);
+                    blankWinCursor =
+                        CreateCursor(GetModuleHandle(nullptr), 0, 0, width,
+                                     height, andMask.data(), xorMask.data());
+                }
+            }
+#endif
+        }
+
+        void UnhookSystemCursor()
+        {
+#ifdef _WIN32
+            if (cursorHookWindow != nullptr && originalCursorProc != nullptr)
+            {
+                SetWindowLongPtr(
+                    cursorHookWindow, GWLP_WNDPROC,
+                    reinterpret_cast<LONG_PTR>(originalCursorProc));
+            }
+
+            cursorHookWindow = nullptr;
+            originalCursorProc = nullptr;
+#endif
+        }
+
+        void InstallSystemCursorHook()
+        {
+#ifdef _WIN32
+            if (window == nullptr || blankWinCursor == nullptr)
+            {
+                return;
+            }
+
+            SDL_SysWMinfo info;
+            SDL_VERSION(&info.version);
+
+            if (SDL_GetWindowWMInfo(window, &info) != SDL_TRUE ||
+                info.subsystem != SDL_SYSWM_WINDOWS)
+            {
+                return;
+            }
+
+            HWND hwnd = info.info.win.window;
+
+            if (hwnd == nullptr || hwnd == cursorHookWindow)
+            {
+                return;
+            }
+
+            UnhookSystemCursor();
+
+            const auto previous = reinterpret_cast<WNDPROC>(SetWindowLongPtr(
+                hwnd, GWLP_WNDPROC,
+                reinterpret_cast<LONG_PTR>(SuppressSystemCursorProc)));
+
+            if (previous == nullptr)
+            {
+                return;
+            }
+
+            originalCursorProc = previous;
+            cursorHookWindow = hwnd;
+#endif
+        }
+
+        void HideSystemCursor()
+        {
+            EnsureBlankCursors();
+            InstallSystemCursorHook();
+
+            if (blankSdlCursor != nullptr)
+            {
+                SDL_SetCursor(blankSdlCursor);
+                SDL_ShowCursor(SDL_ENABLE);
+            }
+            else
+            {
+                SDL_ShowCursor(SDL_DISABLE);
+            }
+
+#ifdef _WIN32
+            if (blankWinCursor != nullptr)
+            {
+                SetCursor(blankWinCursor);
+            }
+#endif
+        }
+
+        void ShowSystemCursor()
+        {
+            UnhookSystemCursor();
+            SDL_SetCursor(SDL_GetDefaultCursor());
+            SDL_ShowCursor(SDL_ENABLE);
+        }
+
+        void DestroyBlankCursors()
+        {
+            UnhookSystemCursor();
+
+            if (blankSdlCursor != nullptr)
+            {
+                SDL_FreeCursor(blankSdlCursor);
+                blankSdlCursor = nullptr;
+            }
+
+#ifdef _WIN32
+            if (blankWinCursor != nullptr)
+            {
+                DestroyCursor(blankWinCursor);
+                blankWinCursor = nullptr;
+            }
+#endif
+        }
+
+        void ReleaseCursorConfine()
+        {
+            if (window != nullptr &&
+                (confinedCursorWidth != 0 || confinedCursorHeight != 0))
+            {
+                SDL_SetWindowMouseRect(window, nullptr);
+            }
+
+            confinedCursorWidth = 0;
+            confinedCursorHeight = 0;
+        }
+
+        void ConfineCursorToWindow(int windowWidth, int windowHeight)
+        {
+            if (window == nullptr || windowWidth <= 0 || windowHeight <= 0 ||
+                (windowWidth == confinedCursorWidth &&
+                 windowHeight == confinedCursorHeight))
+            {
+                return;
+            }
+
+            SDL_Rect bounds;
+            bounds.x = 0;
+            bounds.y = 0;
+            bounds.w = windowWidth;
+            bounds.h = windowHeight;
+
+            if (SDL_SetWindowMouseRect(window, &bounds) == 0)
+            {
+                confinedCursorWidth = windowWidth;
+                confinedCursorHeight = windowHeight;
+            }
+        }
+
+        void DrawCursor()
+        {
+            if (renderer == nullptr || window == nullptr ||
+                defaultCursorStyle.empty())
+            {
+                return;
+            }
+
+            const auto style = cursorStyles.find(defaultCursorStyle);
+
+            if (style == cursorStyles.end())
+            {
+                return;
+            }
+
+            const auto found = images.find(style->second.imageName);
+
+            if (found == images.end())
+            {
+                throw std::runtime_error("Could not draw cursor.");
+            }
+
+            SDL_Texture *texture = found->second;
+            int width = 0;
+            int height = 0;
+            int mouseX = 0;
+            int mouseY = 0;
+            int windowWidth = 0;
+            int windowHeight = 0;
+            int canvasWidth = 0;
+            int canvasHeight = 0;
+
+            SDL_GetWindowSize(window, &windowWidth, &windowHeight);
+
+            if (SDL_QueryTexture(texture, nullptr, nullptr, &width,
+                                 &height) != 0 ||
+                SDL_GetRendererOutputSize(renderer, &canvasWidth,
+                                          &canvasHeight) != 0 ||
+                windowWidth <= 0 || windowHeight <= 0 || width <= 0 ||
+                height <= 0)
+            {
+                throw std::runtime_error("Could not draw cursor.");
+            }
+
+            const Uint32 windowFlags = SDL_GetWindowFlags(window);
+
+            if ((windowFlags & SDL_WINDOW_INPUT_FOCUS) == 0)
+            {
+                ReleaseCursorConfine();
+                ShowSystemCursor();
+                return;
+            }
+
+            HideSystemCursor();
+
+            ConfineCursorToWindow(windowWidth, windowHeight);
+            SDL_GetMouseState(&mouseX, &mouseY);
+
+            if ((windowFlags & SDL_WINDOW_MOUSE_FOCUS) == 0)
+            {
+                if (mouseX < 0)
+                {
+                    mouseX = 0;
+                }
+
+                if (mouseY < 0)
+                {
+                    mouseY = 0;
+                }
+
+                if (mouseX >= windowWidth)
+                {
+                    mouseX = windowWidth - 1;
+                }
+
+                if (mouseY >= windowHeight)
+                {
+                    mouseY = windowHeight - 1;
+                }
+            }
+
+            const double scaleX =
+                static_cast<double>(canvasWidth) / windowWidth;
+            const double scaleY =
+                static_cast<double>(canvasHeight) / windowHeight;
+            SDL_Rect source;
+            source.x = 0;
+            source.y = 0;
+            source.w = width;
+            source.h = height;
+            SDL_Rect destination;
+            destination.x =
+                static_cast<int>(mouseX * scaleX) - style->second.hotspotX;
+            destination.y =
+                static_cast<int>(mouseY * scaleY) - style->second.hotspotY;
+            destination.w = width;
+            destination.h = height;
+
+            if (!ClipCursorRect(source, destination, canvasWidth,
+                                canvasHeight))
+            {
+                return;
+            }
+
+            if (SDL_RenderCopy(renderer, texture, &source, &destination) != 0)
+            {
+                throw std::runtime_error("Could not draw cursor.");
+            }
+        }
+
         void DestroyWindow()
         {
+            UnhookSystemCursor();
+            ReleaseCursorConfine();
             DestroyImages();
 
             if (renderer != nullptr)
@@ -412,6 +841,57 @@ namespace ForradiaLang
         }
     }
 
+    void Graphics::AddCursorStyle(std::string_view styleName,
+                                  std::string_view imageName)
+    {
+        if (renderer == nullptr || styleName.empty() || imageName.empty())
+        {
+            throw std::runtime_error("Could not add cursor style.");
+        }
+
+        const std::string style{styleName};
+        const std::string image{imageName};
+
+        if (!images.contains(image))
+        {
+            throw std::runtime_error("Could not add cursor style.");
+        }
+
+        EnsureImageSupport();
+
+        SDL_Surface *surface = IMG_Load(ImageFile(image).string().c_str());
+
+        if (surface == nullptr)
+        {
+            throw std::runtime_error("Could not add cursor style.");
+        }
+
+        int hotspotX = 0;
+        int hotspotY = 0;
+        const bool hotspotReady = CursorHotspot(surface, hotspotX, hotspotY);
+        SDL_FreeSurface(surface);
+
+        if (!hotspotReady)
+        {
+            throw std::runtime_error("Could not add cursor style.");
+        }
+
+        cursorStyles[style] = CursorStyle{image, hotspotX, hotspotY};
+    }
+
+    void Graphics::SetDefaultCursorStyle(std::string_view styleName)
+    {
+        const std::string style{styleName};
+
+        if (!cursorStyles.contains(style))
+        {
+            throw std::runtime_error("Could not set default cursor style.");
+        }
+
+        defaultCursorStyle = style;
+        HideSystemCursor();
+    }
+
     void Graphics::DrawString(std::string_view text, double x, double y,
                               int fontSize, bool centered)
     {
@@ -609,6 +1089,8 @@ namespace ForradiaLang
                 draw();
             }
 
+            DrawCursor();
+
             Present();
 
             SDL_Delay(16);
@@ -617,6 +1099,17 @@ namespace ForradiaLang
 
     void Graphics::Shutdown()
     {
+        defaultCursorStyle.clear();
+        cursorStyles.clear();
+        ReleaseCursorConfine();
+
+        if (SDL_WasInit(SDL_INIT_VIDEO) != 0)
+        {
+            ShowSystemCursor();
+        }
+
+        DestroyBlankCursors();
+
         DestroyWindow();
         DestroyFonts();
         fontFile.clear();

@@ -25,6 +25,11 @@ namespace ForradiaLang
 
         void AddFontSizes(const std::vector<int> &sizes);
 
+        void AddCursorStyle(std::string_view styleName,
+                            std::string_view imageName);
+
+        void SetDefaultCursorStyle(std::string_view styleName);
+
         void DrawImage(std::string_view name, double x, double y,
                        double width, double height);
 
