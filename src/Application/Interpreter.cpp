@@ -72,8 +72,20 @@ namespace ForradiaLang
             std::string onKeyDownParameter;
         };
 
+        struct ListRef
+        {
+            int id{0};
+        };
+
         using Value = std::variant<double, std::string, Object, Coloring::Color,
-                                   SceneObject, std::vector<double>, Point>;
+                                   SceneObject, std::vector<double>, Point,
+                                   ListRef>;
+
+        struct ListData
+        {
+            std::string elementType;
+            std::vector<Value> elements;
+        };
 
         struct ExecutionState
         {
@@ -86,8 +98,10 @@ namespace ForradiaLang
             std::string currentSceneType;
             std::filesystem::path sourceDirectory;
             int nextObjectId{1};
+            int nextListId{1};
             std::unordered_map<int, std::unordered_map<std::string, Value>>
                 objectFields;
+            std::unordered_map<int, ListData> lists;
         };
 
         double AsNumber(const Value &value)
@@ -160,6 +174,28 @@ namespace ForradiaLang
         }
 
         Value Evaluate(ExecutionState &state, const Expression &expression);
+
+        Value EvaluateField(ExecutionState &state, const FieldInfo &field);
+
+        Object MakeInstance(ExecutionState &state, const std::string &className)
+        {
+            const auto classInfo = state.classes.find(className);
+
+            if (classInfo == state.classes.end())
+            {
+                throw std::runtime_error("Unknown class.");
+            }
+
+            Object instance{className, state.nextObjectId++};
+            auto &fields = state.objectFields[instance.id];
+
+            for (const auto &field : classInfo->second.fields)
+            {
+                fields[field.name] = EvaluateField(state, field);
+            }
+
+            return instance;
+        }
 
         Point MakePoint(
             ExecutionState &state,
@@ -641,11 +677,90 @@ namespace ForradiaLang
             std::cout.flush();
         }
 
+        bool IsListType(std::string_view typeName)
+        {
+            if (!typeName.starts_with("List<") || typeName.size() < 7 ||
+                typeName.back() != '>')
+            {
+                return false;
+            }
+
+            int depth = 0;
+
+            for (std::size_t index = 4; index < typeName.size(); ++index)
+            {
+                const char character = typeName[index];
+
+                if (character == '<')
+                {
+                    ++depth;
+                }
+                else if (character == '>')
+                {
+                    --depth;
+                }
+
+                if (depth == 0)
+                {
+                    return index + 1 == typeName.size();
+                }
+            }
+
+            return false;
+        }
+
+        std::string ListElementType(std::string_view typeName)
+        {
+            return std::string(typeName.substr(5, typeName.size() - 6));
+        }
+
+        ListRef MakeList(ExecutionState &state, const std::string &elementType)
+        {
+            const int id = state.nextListId++;
+            state.lists.insert({id, ListData{elementType, {}}});
+            return ListRef{id};
+        }
+
+        Value DefaultField(ExecutionState &state, const std::string &typeName)
+        {
+            if (typeName == "Int" || typeName == "Double")
+            {
+                return 0.0;
+            }
+
+            if (typeName == "String")
+            {
+                return std::string{};
+            }
+
+            if (typeName == "Point")
+            {
+                return Point{};
+            }
+
+            if (Coloring::IsColorType(typeName))
+            {
+                return Coloring::Color{};
+            }
+
+            if (IsListType(typeName))
+            {
+                return MakeList(state, ListElementType(typeName));
+            }
+
+            if (!state.classes.contains(typeName))
+            {
+                throw std::runtime_error("Unknown type.");
+            }
+
+            return MakeInstance(state, typeName);
+        }
+
         Value EvaluateField(ExecutionState &state, const FieldInfo &field)
         {
             if (field.value == nullptr)
             {
-                throw std::runtime_error("Expected a value.");
+                return DefaultField(state, field.typeName);
             }
 
             const Value value = Evaluate(state, *field.value);
@@ -665,6 +780,36 @@ namespace ForradiaLang
                 if (!std::holds_alternative<double>(value))
                 {
                     throw std::runtime_error("Expected a number.");
+                }
+
+                return value;
+            }
+
+            if (field.typeName == "String")
+            {
+                if (!std::holds_alternative<std::string>(value))
+                {
+                    throw std::runtime_error("Expected a string.");
+                }
+
+                return value;
+            }
+
+            if (IsListType(field.typeName))
+            {
+                const auto *list = std::get_if<ListRef>(&value);
+
+                if (list == nullptr)
+                {
+                    throw std::runtime_error("Expected a list.");
+                }
+
+                const auto found = state.lists.find(list->id);
+
+                if (found == state.lists.end() ||
+                    found->second.elementType != ListElementType(field.typeName))
+                {
+                    throw std::runtime_error("Expected a list.");
                 }
 
                 return value;
@@ -848,15 +993,8 @@ namespace ForradiaLang
                     throw std::runtime_error("Unexpected arguments.");
                 }
 
-                Object instance{object->typeName, state.nextObjectId++};
-                auto &fields = state.objectFields[instance.id];
-
-                for (const auto &field : classInfo->second.fields)
-                {
-                    fields[field.name] = EvaluateField(state, field);
-                }
-
-                state.variables[object->name] = std::move(instance);
+                state.variables[object->name] =
+                    MakeInstance(state, object->typeName);
                 return;
             }
 

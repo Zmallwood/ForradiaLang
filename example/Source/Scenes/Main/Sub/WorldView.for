@@ -1,6 +1,7 @@
 ' Copyright (c) 2026 Andreas Åkerberg
 ' SPDX-License-Identifier: MIT
 
+Import Core.WorldStructure.World
 Import Core.CoreGameObjects.Player
 
 Class WorldView

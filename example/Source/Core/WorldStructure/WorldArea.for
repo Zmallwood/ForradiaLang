@@ -1,7 +1,8 @@
 ' Copyright (c) 2026 Andreas Åkerberg
 ' SPDX-License-Identifier: MIT
 
-Import Game
+Import Tile
 
-Game game
-game.Start
+Class WorldArea
+    List<List<Tile>> tiles
+End

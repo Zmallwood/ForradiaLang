@@ -1,7 +1,6 @@
 ' Copyright (c) 2026 Andreas Åkerberg
 ' SPDX-License-Identifier: MIT
 
-Import Game
-
-Game game
-game.Start
+Class Tile
+    String ground = ""
+End

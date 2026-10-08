@@ -646,27 +646,48 @@ namespace ForradiaLang
             return function;
         }
 
-        FieldDeclaration ParseField(ParseState &state)
+        std::string ParseTypeName(ParseState &state)
         {
-            FieldDeclaration field;
+            std::string name;
 
-            if (Peek(state).type == TokenTypes::Int ||
-                Peek(state).type == TokenTypes::Double)
+            if (!AtEnd(state) && (Peek(state).type == TokenTypes::Int ||
+                                  Peek(state).type == TokenTypes::Double))
             {
-                field.typeName = Advance(state).value;
+                name = Advance(state).value;
             }
             else
             {
-                field.typeName =
-                    Expect(state, TokenTypes::Identifier, "Expected a type.")
-                        .value;
+                name = Expect(state, TokenTypes::Identifier, "Expected a type.")
+                           .value;
             }
+
+            if (AtEnd(state) || Peek(state).type != TokenTypes::LessThan)
+            {
+                return name;
+            }
+
+            Advance(state);
+            name += '<';
+            name += ParseTypeName(state);
+            Expect(state, TokenTypes::GreaterThan, "Expected '>'.");
+            name += '>';
+
+            return name;
+        }
+
+        FieldDeclaration ParseField(ParseState &state)
+        {
+            FieldDeclaration field;
+            field.typeName = ParseTypeName(state);
 
             field.name =
                 Expect(state, TokenTypes::Identifier, "Expected a name.").value;
 
-            Expect(state, TokenTypes::Equals, "Expected '='.");
-            field.value = ParseExpression(state);
+            if (!AtEnd(state) && Peek(state).type == TokenTypes::Equals)
+            {
+                Advance(state);
+                field.value = ParseExpression(state);
+            }
 
             return field;
         }
