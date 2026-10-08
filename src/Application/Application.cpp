@@ -39,6 +39,59 @@ namespace ForradiaLang
             return parser.Parse(lexer.Tokenize(ReadSource(path)));
         }
 
+        std::filesystem::path
+        ModuleFile(const std::filesystem::path &directory,
+                   const std::string &moduleName)
+        {
+            std::string relative = moduleName;
+
+            for (char &character : relative)
+            {
+                if (character == '.')
+                {
+                    character = '/';
+                }
+            }
+
+            return directory / (relative + ".frd");
+        }
+
+        std::filesystem::path
+        ResolveModule(const std::filesystem::path &importingFile,
+                      const std::string &moduleName)
+        {
+            const auto local =
+                ModuleFile(importingFile.parent_path(), moduleName);
+
+            if (std::filesystem::exists(local))
+            {
+                return local;
+            }
+
+            auto directory = importingFile.parent_path();
+
+            while (!directory.empty())
+            {
+                const auto parent = directory.parent_path();
+
+                if (parent == directory)
+                {
+                    break;
+                }
+
+                directory = parent;
+
+                const auto candidate = ModuleFile(directory, moduleName);
+
+                if (std::filesystem::exists(candidate))
+                {
+                    return candidate;
+                }
+            }
+
+            return local;
+        }
+
         std::vector<std::unique_ptr<Statement>>
         LoadProgram(const std::filesystem::path &path,
                     std::unordered_set<std::string> &loaded)
@@ -83,18 +136,7 @@ namespace ForradiaLang
                     continue;
                 }
 
-                std::string relative = import->moduleName;
-
-                for (char &character : relative)
-                {
-                    if (character == '.')
-                    {
-                        character = '/';
-                    }
-                }
-
-                const auto modulePath =
-                    path.parent_path() / (relative + ".frd");
+                const auto modulePath = ResolveModule(path, import->moduleName);
                 auto imported = LoadProgram(modulePath, loaded);
 
                 for (auto &importedStatement : imported)

@@ -177,30 +177,36 @@ namespace ForradiaLang
 
             if (token.type == TokenTypes::Identifier)
             {
+                std::unique_ptr<Expression> expression;
+
                 if (!AtEnd(state) &&
                     Peek(state).type == TokenTypes::LeftParen)
                 {
-                    auto expression = std::make_unique<CallExpression>();
-                    expression->name = token.value;
-                    expression->arguments = ParseArguments(state);
-                    return expression;
+                    auto call = std::make_unique<CallExpression>();
+                    call->name = token.value;
+                    call->arguments = ParseArguments(state);
+                    expression = std::move(call);
+                }
+                else
+                {
+                    auto variable = std::make_unique<VariableExpression>();
+                    variable->name = token.value;
+                    expression = std::move(variable);
                 }
 
-                if (!AtEnd(state) && Peek(state).type == TokenTypes::Dot)
+                while (!AtEnd(state) && Peek(state).type == TokenTypes::Dot)
                 {
                     Advance(state);
 
-                    auto expression = std::make_unique<MemberExpression>();
-                    expression->objectName = token.value;
-                    expression->memberName =
+                    auto member = std::make_unique<MemberExpression>();
+                    member->object = std::move(expression);
+                    member->memberName =
                         Expect(state, TokenTypes::Identifier,
                                "Expected a name.")
                             .value;
-                    return expression;
+                    expression = std::move(member);
                 }
 
-                auto expression = std::make_unique<VariableExpression>();
-                expression->name = token.value;
                 return expression;
             }
 
@@ -241,7 +247,7 @@ namespace ForradiaLang
             return expression;
         }
 
-        std::unique_ptr<Expression> ParseExpression(ParseState &state)
+        std::unique_ptr<Expression> ParseComparison(ParseState &state)
         {
             auto expression = ParseAddition(state);
 
@@ -252,6 +258,24 @@ namespace ForradiaLang
                 binary->left = std::move(expression);
                 binary->operation = operation;
                 binary->right = ParseAddition(state);
+                expression = std::move(binary);
+            }
+
+            return expression;
+        }
+
+        std::unique_ptr<Expression> ParseExpression(ParseState &state)
+        {
+            auto expression = ParseComparison(state);
+
+            while (!AtEnd(state) && Peek(state).type == TokenTypes::And)
+            {
+                Advance(state);
+
+                auto binary = std::make_unique<BinaryExpression>();
+                binary->left = std::move(expression);
+                binary->operation = '&';
+                binary->right = ParseComparison(state);
                 expression = std::move(binary);
             }
 
@@ -576,6 +600,31 @@ namespace ForradiaLang
             return function;
         }
 
+        FieldDeclaration ParseField(ParseState &state)
+        {
+            FieldDeclaration field;
+
+            if (Peek(state).type == TokenTypes::Int ||
+                Peek(state).type == TokenTypes::Double)
+            {
+                field.typeName = Advance(state).value;
+            }
+            else
+            {
+                field.typeName =
+                    Expect(state, TokenTypes::Identifier, "Expected a type.")
+                        .value;
+            }
+
+            field.name =
+                Expect(state, TokenTypes::Identifier, "Expected a name.").value;
+
+            Expect(state, TokenTypes::Equals, "Expected '='.");
+            field.value = ParseExpression(state);
+
+            return field;
+        }
+
         std::unique_ptr<ClassDeclaration> ParseClass(ParseState &state)
         {
             Expect(state, TokenTypes::Class, "Expected 'Class'.");
@@ -593,7 +642,13 @@ namespace ForradiaLang
                     break;
                 }
 
-                declaration->methods.push_back(ParseFunction(state));
+                if (Peek(state).type == TokenTypes::Fn)
+                {
+                    declaration->methods.push_back(ParseFunction(state));
+                    continue;
+                }
+
+                declaration->fields.push_back(ParseField(state));
             }
 
             Expect(state, TokenTypes::End, "Expected 'End'.");

@@ -7,7 +7,7 @@ namespace ForradiaLang
     class MemberExpression : public Expression
     {
       public:
-        std::string objectName;
+        std::unique_ptr<Expression> object;
         std::string memberName;
     };
 }

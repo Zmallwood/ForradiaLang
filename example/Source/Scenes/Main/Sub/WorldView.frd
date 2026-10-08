@@ -1,6 +1,8 @@
 ' Copyright (c) 2026 Andreas Åkerberg
 ' SPDX-License-Identifier: MIT
 
+Import Core.CoreGameObjects.Player
+
 Class WorldView
     Fn Draw
         Double tileWidth = 0.05
@@ -14,6 +16,10 @@ Class WorldView
                 Double heightPx = tileHeight
 
                 DrawImage "GroundGrass", xPx, yPx, widthPx, heightPx
+
+                If x == 5 And y == 5 Then
+                    DrawImage "Player", xPx, yPx - heightPx/2, widthPx, heightPx
+                End
             Next
         Next
     End

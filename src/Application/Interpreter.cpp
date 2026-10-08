@@ -28,15 +28,30 @@ namespace ForradiaLang
 {
     namespace
     {
+        struct Point
+        {
+            double x{0.0};
+            double y{0.0};
+        };
+
         struct Object
         {
             std::string className;
+            int id{0};
+        };
+
+        struct FieldInfo
+        {
+            std::string typeName;
+            std::string name;
+            const Expression *value{nullptr};
         };
 
         struct ClassInfo
         {
             std::unordered_map<std::string, const FunctionDeclaration *>
                 methods;
+            std::vector<FieldInfo> fields;
         };
 
         struct SceneObject
@@ -57,7 +72,7 @@ namespace ForradiaLang
         };
 
         using Value = std::variant<double, std::string, Object, Coloring::Color,
-                                   SceneObject, std::vector<double>>;
+                                   SceneObject, std::vector<double>, Point>;
 
         struct ExecutionState
         {
@@ -69,6 +84,9 @@ namespace ForradiaLang
             std::unordered_map<std::string, std::string> addedScenes;
             std::string currentSceneType;
             std::filesystem::path sourceDirectory;
+            int nextObjectId{1};
+            std::unordered_map<int, std::unordered_map<std::string, Value>>
+                objectFields;
         };
 
         double AsNumber(const Value &value)
@@ -142,6 +160,19 @@ namespace ForradiaLang
 
         Value Evaluate(ExecutionState &state, const Expression &expression);
 
+        Point MakePoint(
+            ExecutionState &state,
+            const std::vector<std::unique_ptr<Expression>> &arguments)
+        {
+            if (arguments.size() != 2)
+            {
+                throw std::runtime_error("Expected two arguments.");
+            }
+
+            return Point{AsNumber(Evaluate(state, *arguments[0])),
+                         AsNumber(Evaluate(state, *arguments[1]))};
+        }
+
         void ExecuteBlock(
             ExecutionState &state,
             const std::vector<std::unique_ptr<Statement>> &statements);
@@ -152,6 +183,16 @@ namespace ForradiaLang
         Value EvaluateBinary(ExecutionState &state,
                              const BinaryExpression &expression)
         {
+            if (expression.operation == '&')
+            {
+                if (!IsTrue(Evaluate(state, *expression.left)))
+                {
+                    return 0.0;
+                }
+
+                return IsTrue(Evaluate(state, *expression.right)) ? 1.0 : 0.0;
+            }
+
             const double left = AsNumber(Evaluate(state, *expression.left));
             const double right = AsNumber(Evaluate(state, *expression.right));
 
@@ -222,33 +263,83 @@ namespace ForradiaLang
                 return Graphics::ConvertWidthToHeight(width);
             }
 
+            if (expression.name == "Point")
+            {
+                return MakePoint(state, expression.arguments);
+            }
+
             throw std::runtime_error("Unknown function.");
         }
 
-        Value EvaluateMember(const MemberExpression &expression)
+        Value EvaluateMember(ExecutionState &state,
+                             const MemberExpression &expression)
         {
-            if (expression.objectName == "MouseButtons")
+            if (const auto *variable = dynamic_cast<const VariableExpression *>(
+                    expression.object.get()))
             {
-                if (expression.memberName == "Left")
+                if (variable->name == "MouseButtons")
                 {
-                    return static_cast<double>(SDL_BUTTON_LEFT);
+                    if (expression.memberName == "Left")
+                    {
+                        return static_cast<double>(SDL_BUTTON_LEFT);
+                    }
+
+                    if (expression.memberName == "Right")
+                    {
+                        return static_cast<double>(SDL_BUTTON_RIGHT);
+                    }
+
+                    throw std::runtime_error("Unknown member.");
                 }
 
-                if (expression.memberName == "Right")
+                if (variable->name == "Keys" &&
+                    expression.memberName.size() == 1)
                 {
-                    return static_cast<double>(SDL_BUTTON_RIGHT);
+                    const char letter = expression.memberName[0];
+
+                    if (letter >= 'A' && letter <= 'Z')
+                    {
+                        return static_cast<double>(SDLK_a + (letter - 'A'));
+                    }
+
+                    throw std::runtime_error("Unknown member.");
                 }
             }
 
-            if (expression.objectName == "Keys" &&
-                expression.memberName.size() == 1)
-            {
-                const char letter = expression.memberName[0];
+            const Value object = Evaluate(state, *expression.object);
 
-                if (letter >= 'A' && letter <= 'Z')
+            if (const auto *point = std::get_if<Point>(&object))
+            {
+                if (expression.memberName == "x")
                 {
-                    return static_cast<double>(SDLK_a + (letter - 'A'));
+                    return point->x;
                 }
+
+                if (expression.memberName == "y")
+                {
+                    return point->y;
+                }
+
+                throw std::runtime_error("Unknown member.");
+            }
+
+            if (const auto *instance = std::get_if<Object>(&object))
+            {
+                const auto fields = state.objectFields.find(instance->id);
+
+                if (fields == state.objectFields.end())
+                {
+                    throw std::runtime_error("Unknown member.");
+                }
+
+                const auto field = fields->second.find(expression.memberName);
+
+                if (field == fields->second.end())
+                {
+                    throw std::runtime_error("Unknown member.");
+                }
+
+                return field->second;
             }
 
             throw std::runtime_error("Unknown member.");
@@ -296,7 +387,7 @@ namespace ForradiaLang
             if (const auto *member =
                     dynamic_cast<const MemberExpression *>(&expression))
             {
-                return EvaluateMember(*member);
+                return EvaluateMember(state, *member);
             }
 
             if (const auto *list =
@@ -532,6 +623,62 @@ namespace ForradiaLang
             std::cout.flush();
         }
 
+        Value EvaluateField(ExecutionState &state, const FieldInfo &field)
+        {
+            if (field.value == nullptr)
+            {
+                throw std::runtime_error("Expected a value.");
+            }
+
+            const Value value = Evaluate(state, *field.value);
+
+            if (field.typeName == "Point")
+            {
+                if (!std::holds_alternative<Point>(value))
+                {
+                    throw std::runtime_error("Expected a point.");
+                }
+
+                return value;
+            }
+
+            if (field.typeName == "Int" || field.typeName == "Double")
+            {
+                if (!std::holds_alternative<double>(value))
+                {
+                    throw std::runtime_error("Expected a number.");
+                }
+
+                return value;
+            }
+
+            if (Coloring::IsColorType(field.typeName))
+            {
+                if (!std::holds_alternative<Coloring::Color>(value))
+                {
+                    throw std::runtime_error("Expected a color.");
+                }
+
+                return value;
+            }
+
+            const auto found = state.classes.find(field.typeName);
+
+            if (found == state.classes.end())
+            {
+                throw std::runtime_error("Unknown type.");
+            }
+
+            const auto *instance = std::get_if<Object>(&value);
+
+            if (instance == nullptr || instance->className != field.typeName)
+            {
+                throw std::runtime_error("Expected an object.");
+            }
+
+            return value;
+        }
+
         void
         ExecuteBlock(ExecutionState &state,
                      const std::vector<std::unique_ptr<Statement>> &statements)
@@ -633,6 +780,13 @@ namespace ForradiaLang
                     return;
                 }
 
+                if (object->typeName == "Point")
+                {
+                    state.variables[object->name] =
+                        MakePoint(state, object->arguments);
+                    return;
+                }
+
                 if (state.sceneTypes.contains(object->typeName))
                 {
                     if (!object->arguments.empty())
@@ -645,7 +799,9 @@ namespace ForradiaLang
                     return;
                 }
 
-                if (!state.classes.contains(object->typeName))
+                const auto classInfo = state.classes.find(object->typeName);
+
+                if (classInfo == state.classes.end())
                 {
                     throw std::runtime_error("Unknown class.");
                 }
@@ -655,7 +811,15 @@ namespace ForradiaLang
                     throw std::runtime_error("Unexpected arguments.");
                 }
 
-                state.variables[object->name] = Object{object->typeName};
+                Object instance{object->typeName, state.nextObjectId++};
+                auto &fields = state.objectFields[instance.id];
+
+                for (const auto &field : classInfo->second.fields)
+                {
+                    fields[field.name] = EvaluateField(state, field);
+                }
+
+                state.variables[object->name] = std::move(instance);
                 return;
             }
 
@@ -799,6 +963,12 @@ namespace ForradiaLang
                     for (const auto &method : declaration->methods)
                     {
                         info.methods[method->name] = method.get();
+                    }
+
+                    for (const auto &field : declaration->fields)
+                    {
+                        info.fields.push_back(FieldInfo{
+                            field.typeName, field.name, field.value.get()});
                     }
 
                     state.classes[declaration->name] = std::move(info);

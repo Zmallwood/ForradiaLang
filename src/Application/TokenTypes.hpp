@@ -26,6 +26,7 @@ namespace ForradiaLang
         Then,
         Else,
         ElseIf,
+        And,
         End,
         Print,
         Int,

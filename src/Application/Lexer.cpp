@@ -42,6 +42,11 @@ namespace ForradiaLang
                 return TokenTypes::ElseIf;
             }
 
+            if (word == "And")
+            {
+                return TokenTypes::And;
+            }
+
             if (word == "End")
             {
                 return TokenTypes::End;
