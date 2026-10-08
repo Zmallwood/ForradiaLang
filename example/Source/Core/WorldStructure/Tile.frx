@@ -2,6 +2,6 @@
 ' SPDX-License-Identifier: MIT
 
 Class Tile
-    String ground = ""
+    String groundType = String.Empty
     Int elevation = 0
 End

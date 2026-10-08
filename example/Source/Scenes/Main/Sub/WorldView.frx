@@ -14,24 +14,33 @@ Class WorldView
 
         WorldArea worldArea = gWorld.currentWorldArea
 
+        Size size = worldArea.GetSize
+
         For y = 0 To 10
             For x = 0 To 10
                 Int xCoordinate = playerPosition.x - 5 + x
                 Int yCoordinate = playerPosition.y - 5 + y
 
-                If xCoordinate < 0 Or _
-                    yCoordinate < 0 Or _ 
-                    xCoordinate >= 100 Or _
-                    yCoordinate >= 100 Then
+                If Not worldArea.IsValidCoordinate(xCoordinate, yCoordinate) Then
                     Continue
                 End
+
+                Tile? tile = worldArea.GetTile(xCoordinate, yCoordinate)
+
+                If tile == Nothing Then
+                    Continue
+                End
+
+                String groundType = tile.groundType
 
                 Double xPx = 0.5 - tileWidth/2 + x*tileWidth/2 - y*tileWidth/2
                 Double yPx = 0.5 - 5.5*tileHeight + x*tileHeight/2 + y*tileHeight/2
                 Double widthPx = tileWidth
                 Double heightPx = tileHeight
-
-                DrawImage "GroundGrass", xPx, yPx, widthPx, heightPx
+                
+                If Not groundType == String.Empty Then
+                    DrawImage groundType, xPx, yPx, widthPx, heightPx
+                End
 
                 If x == 5 And y == 5 Then
                     DrawImage "Player", xPx, yPx - heightPx/2, widthPx, heightPx

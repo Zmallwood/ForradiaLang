@@ -52,6 +52,11 @@ namespace ForradiaLang
                 return TokenTypes::Or;
             }
 
+            if (word == "Not")
+            {
+                return TokenTypes::Not;
+            }
+
             if (word == "End")
             {
                 return TokenTypes::End;
@@ -396,6 +401,11 @@ namespace ForradiaLang
 
             case ',':
                 type = TokenTypes::Comma;
+                matched = true;
+                break;
+
+            case '?':
+                type = TokenTypes::Question;
                 matched = true;
                 break;
 

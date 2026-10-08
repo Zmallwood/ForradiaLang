@@ -6,6 +6,7 @@
 #include "Expressions/MemberExpression.hpp"
 #include "Expressions/NumberExpression.hpp"
 #include "Expressions/StringExpression.hpp"
+#include "Expressions/UnaryExpression.hpp"
 #include "Expressions/VariableExpression.hpp"
 #include "Statements/AssignmentStatement.hpp"
 #include "Statements/ClassDeclaration.hpp"
@@ -93,7 +94,9 @@ namespace ForradiaLang
                    type == TokenTypes::Percent;
         }
 
-        void ParseOptionalParameters(ParseState &state)
+        std::string ParseTypeName(ParseState &state);
+
+        void ParseParameters(ParseState &state, FunctionDeclaration &function)
         {
             if (AtEnd(state) || Peek(state).type != TokenTypes::LeftParen)
             {
@@ -101,6 +104,29 @@ namespace ForradiaLang
             }
 
             Advance(state);
+
+            if (!AtEnd(state) && Peek(state).type == TokenTypes::RightParen)
+            {
+                Advance(state);
+                return;
+            }
+
+            while (!AtEnd(state))
+            {
+                Parameter parameter;
+                parameter.typeName = ParseTypeName(state);
+                parameter.name =
+                    Expect(state, TokenTypes::Identifier, "Expected a name.")
+                        .value;
+                function.parameters.push_back(std::move(parameter));
+
+                if (AtEnd(state) || Peek(state).type != TokenTypes::Comma)
+                {
+                    break;
+                }
+
+                Advance(state);
+            }
 
             Expect(state, TokenTypes::RightParen, "Expected ')'.");
         }
@@ -301,6 +327,14 @@ namespace ForradiaLang
                         Expect(state, TokenTypes::Identifier,
                                "Expected a name.")
                             .value;
+
+                    if (!AtEnd(state) &&
+                        Peek(state).type == TokenTypes::LeftParen)
+                    {
+                        member->isCall = true;
+                        member->arguments = ParseArguments(state);
+                    }
+
                     expression = std::move(member);
                 }
 
@@ -368,9 +402,24 @@ namespace ForradiaLang
             return expression;
         }
 
+        std::unique_ptr<Expression> ParseNot(ParseState &state)
+        {
+            if (!AtEnd(state) && Peek(state).type == TokenTypes::Not)
+            {
+                Advance(state);
+
+                auto expression = std::make_unique<UnaryExpression>();
+                expression->operation = '!';
+                expression->operand = ParseNot(state);
+                return expression;
+            }
+
+            return ParseComparison(state);
+        }
+
         std::unique_ptr<Expression> ParseAnd(ParseState &state)
         {
-            auto expression = ParseComparison(state);
+            auto expression = ParseNot(state);
 
             while (!AtEnd(state) && Peek(state).type == TokenTypes::And)
             {
@@ -379,7 +428,7 @@ namespace ForradiaLang
                 auto binary = std::make_unique<BinaryExpression>();
                 binary->left = std::move(expression);
                 binary->operation = '&';
-                binary->right = ParseComparison(state);
+                binary->right = ParseNot(state);
                 expression = std::move(binary);
             }
 
@@ -740,13 +789,22 @@ namespace ForradiaLang
                 throw std::runtime_error("Unexpected token.");
             }
 
+            std::string typeName = name;
+
+            if (!AtEnd(state) && Peek(state).type == TokenTypes::Question &&
+                FollowedBy(state, TokenTypes::Identifier))
+            {
+                Advance(state);
+                typeName += '?';
+            }
+
             if (!AtEnd(state) && Peek(state).type == TokenTypes::Identifier &&
                 !FollowedByComma(state))
             {
                 if (FollowedBy(state, TokenTypes::Equals))
                 {
                     auto statement = std::make_unique<IntStatement>();
-                    statement->typeName = name;
+                    statement->typeName = std::move(typeName);
                     statement->name = Advance(state).value;
                     Expect(state, TokenTypes::Equals, "Expected '='.");
                     statement->value = ParseExpression(state);
@@ -754,7 +812,7 @@ namespace ForradiaLang
                 }
 
                 auto statement = std::make_unique<ObjectStatement>();
-                statement->typeName = name;
+                statement->typeName = std::move(typeName);
                 statement->name = Advance(state).value;
 
                 if (!AtEnd(state) &&
@@ -853,7 +911,7 @@ namespace ForradiaLang
             function->name =
                 Expect(state, TokenTypes::Identifier, "Expected a name.").value;
 
-            ParseOptionalParameters(state);
+            ParseParameters(state, *function);
 
             if (!AtEnd(state) && Peek(state).type == TokenTypes::Identifier &&
                 Peek(state).value == "As")
@@ -867,6 +925,15 @@ namespace ForradiaLang
             Expect(state, TokenTypes::End, "Expected 'End'.");
 
             return function;
+        }
+
+        void AppendNullable(ParseState &state, std::string &name)
+        {
+            if (!AtEnd(state) && Peek(state).type == TokenTypes::Question)
+            {
+                Advance(state);
+                name += '?';
+            }
         }
 
         std::string ParseTypeName(ParseState &state)
@@ -886,6 +953,7 @@ namespace ForradiaLang
 
             if (AtEnd(state) || Peek(state).type != TokenTypes::LessThan)
             {
+                AppendNullable(state, name);
                 return name;
             }
 
@@ -894,6 +962,7 @@ namespace ForradiaLang
             name += ParseTypeName(state);
             Expect(state, TokenTypes::GreaterThan, "Expected '>'.");
             name += '>';
+            AppendNullable(state, name);
 
             return name;
         }

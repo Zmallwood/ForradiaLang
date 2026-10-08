@@ -7,8 +7,9 @@ Class Player
     Point position
 
     New
-        position = Point(GameProperties.kWorldAreaSize.width / 2, _
-                            GameProperties.kWorldAreaSize.height / 2)
+        Size size = GameProperties.kWorldAreaSize
+
+        position = Point(size.width / 2, size.height / 2)
     End
 End
 

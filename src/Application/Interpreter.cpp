@@ -12,6 +12,7 @@
 #include "Expressions/MemberExpression.hpp"
 #include "Expressions/NumberExpression.hpp"
 #include "Expressions/StringExpression.hpp"
+#include "Expressions/UnaryExpression.hpp"
 #include "Expressions/VariableExpression.hpp"
 #include "Graphics.hpp"
 #include "ScenesCore.hpp"
@@ -96,9 +97,13 @@ namespace ForradiaLang
             int id{0};
         };
 
+        struct Null
+        {
+        };
+
         using Value = std::variant<double, std::string, Object, Coloring::Color,
                                    SceneObject, std::vector<double>, Point, Size,
-                                   GroupRef, ListRef>;
+                                   GroupRef, ListRef, Null>;
 
         struct ListData
         {
@@ -172,6 +177,11 @@ namespace ForradiaLang
             if (const auto *text = std::get_if<std::string>(&value))
             {
                 return !text->empty();
+            }
+
+            if (std::holds_alternative<Null>(value))
+            {
+                return false;
             }
 
             throw std::runtime_error("Expected a value.");
@@ -258,6 +268,11 @@ namespace ForradiaLang
             }
         }
 
+        std::optional<Value>
+        CallObjectMethod(ExecutionState &state, const Object &instance,
+                         const std::string &methodName,
+                         const std::vector<Value> &arguments);
+
         Value LookupName(ExecutionState &state, const std::string &name)
         {
             if (!state.currentGroup.empty())
@@ -296,12 +311,41 @@ namespace ForradiaLang
                         return field->second;
                     }
                 }
+
+                const auto className =
+                    state.objectClasses.find(state.currentObjectId);
+
+                if (className != state.objectClasses.end())
+                {
+                    const auto classInfo =
+                        state.classes.find(className->second);
+
+                    if (classInfo != state.classes.end() &&
+                        classInfo->second.methods.contains(name))
+                    {
+                        const Object instance{className->second,
+                                              state.currentObjectId};
+                        const std::optional<Value> returned = CallObjectMethod(
+                            state, instance, name, {});
+
+                        if (!returned.has_value())
+                        {
+                            throw std::runtime_error("Expected a value.");
+                        }
+
+                        return *returned;
+                    }
+                }
             }
 
             throw std::runtime_error("Unknown variable.");
         }
 
         Value Evaluate(ExecutionState &state, const Expression &expression);
+
+        std::vector<Value> EvaluateArguments(
+            ExecutionState &state,
+            const std::vector<std::unique_ptr<Expression>> &arguments);
 
         Value EvaluateField(ExecutionState &state, const FieldInfo &field);
 
@@ -398,10 +442,6 @@ namespace ForradiaLang
         void ExecuteStatement(ExecutionState &state,
                               const Statement &statement);
 
-        std::optional<Value> CallObjectMethod(ExecutionState &state,
-                                              const Object &instance,
-                                              const std::string &methodName);
-
         Value EvaluateBinary(ExecutionState &state,
                              const BinaryExpression &expression)
         {
@@ -423,6 +463,47 @@ namespace ForradiaLang
                 }
 
                 return IsTrue(Evaluate(state, *expression.right)) ? 1.0 : 0.0;
+            }
+
+            if (expression.operation == '=')
+            {
+                const Value left = Evaluate(state, *expression.left);
+                const Value right = Evaluate(state, *expression.right);
+
+                if (std::holds_alternative<Null>(left) ||
+                    std::holds_alternative<Null>(right))
+                {
+                    return std::holds_alternative<Null>(left) &&
+                                   std::holds_alternative<Null>(right)
+                               ? 1.0
+                               : 0.0;
+                }
+
+                if (const auto *leftText = std::get_if<std::string>(&left))
+                {
+                    const auto *rightText = std::get_if<std::string>(&right);
+
+                    if (rightText == nullptr)
+                    {
+                        throw std::runtime_error("Expected a string.");
+                    }
+
+                    return *leftText == *rightText ? 1.0 : 0.0;
+                }
+
+                if (const auto *leftObject = std::get_if<Object>(&left))
+                {
+                    const auto *rightObject = std::get_if<Object>(&right);
+
+                    if (rightObject == nullptr)
+                    {
+                        throw std::runtime_error("Expected an object.");
+                    }
+
+                    return leftObject->id == rightObject->id ? 1.0 : 0.0;
+                }
+
+                return AsNumber(left) == AsNumber(right) ? 1.0 : 0.0;
             }
 
             const double left = AsNumber(Evaluate(state, *expression.left));
@@ -463,9 +544,6 @@ namespace ForradiaLang
                 }
 
                 return std::fmod(left, right);
-
-            case '=':
-                return left == right ? 1.0 : 0.0;
 
             default:
                 throw std::runtime_error("Unknown operation.");
@@ -526,6 +604,34 @@ namespace ForradiaLang
                 }
 
                 return MakeInstance(state, expression.name);
+            }
+
+            if (state.currentObjectId != 0)
+            {
+                const auto className =
+                    state.objectClasses.find(state.currentObjectId);
+
+                if (className != state.objectClasses.end())
+                {
+                    const auto classInfo = state.classes.find(className->second);
+
+                    if (classInfo != state.classes.end() &&
+                        classInfo->second.methods.contains(expression.name))
+                    {
+                        const Object instance{className->second,
+                                              state.currentObjectId};
+                        const std::optional<Value> returned = CallObjectMethod(
+                            state, instance, expression.name,
+                            EvaluateArguments(state, expression.arguments));
+
+                        if (!returned.has_value())
+                        {
+                            throw std::runtime_error("Expected a value.");
+                        }
+
+                        return *returned;
+                    }
+                }
             }
 
             throw std::runtime_error("Unknown function.");
@@ -597,6 +703,21 @@ namespace ForradiaLang
             throw std::runtime_error("Unknown member.");
         }
 
+        std::vector<Value> EvaluateArguments(
+            ExecutionState &state,
+            const std::vector<std::unique_ptr<Expression>> &arguments)
+        {
+            std::vector<Value> values;
+            values.reserve(arguments.size());
+
+            for (const auto &argument : arguments)
+            {
+                values.push_back(Evaluate(state, *argument));
+            }
+
+            return values;
+        }
+
         Value EvaluateMember(ExecutionState &state,
                              const MemberExpression &expression)
         {
@@ -636,9 +757,24 @@ namespace ForradiaLang
 
                     throw std::runtime_error("Unknown member.");
                 }
+
+                if (variable->name == "String")
+                {
+                    if (expression.memberName == "Empty")
+                    {
+                        return std::string{};
+                    }
+
+                    throw std::runtime_error("Unknown member.");
+                }
             }
 
             const Value object = Evaluate(state, *expression.object);
+
+            if (std::holds_alternative<Null>(object))
+            {
+                throw std::runtime_error("Expected an object.");
+            }
 
             if (const auto *group = std::get_if<GroupRef>(&object))
             {
@@ -695,29 +831,35 @@ namespace ForradiaLang
 
             if (const auto *instance = std::get_if<Object>(&object))
             {
-                const auto fields = state.objectFields.find(instance->id);
-
-                if (fields != state.objectFields.end())
+                if (!expression.isCall)
                 {
-                    const auto field =
-                        fields->second.find(expression.memberName);
+                    const auto fields = state.objectFields.find(instance->id);
 
-                    if (field != fields->second.end())
+                    if (fields != state.objectFields.end())
                     {
-                        return field->second;
+                        const auto field =
+                            fields->second.find(expression.memberName);
+
+                        if (field != fields->second.end())
+                        {
+                            return field->second;
+                        }
+                    }
+
+                    const auto classInfo =
+                        state.classes.find(instance->className);
+
+                    if (classInfo == state.classes.end() ||
+                        !classInfo->second.methods.contains(
+                            expression.memberName))
+                    {
+                        throw std::runtime_error("Unknown member.");
                     }
                 }
 
-                const auto classInfo = state.classes.find(instance->className);
-
-                if (classInfo == state.classes.end() ||
-                    !classInfo->second.methods.contains(expression.memberName))
-                {
-                    throw std::runtime_error("Unknown member.");
-                }
-
-                const std::optional<Value> returned =
-                    CallObjectMethod(state, *instance, expression.memberName);
+                const std::optional<Value> returned = CallObjectMethod(
+                    state, *instance, expression.memberName,
+                    EvaluateArguments(state, expression.arguments));
 
                 if (!returned.has_value())
                 {
@@ -754,6 +896,18 @@ namespace ForradiaLang
                     dynamic_cast<const BinaryExpression *>(&expression))
             {
                 return EvaluateBinary(state, *binary);
+            }
+
+            if (const auto *unary =
+                    dynamic_cast<const UnaryExpression *>(&expression))
+            {
+                if (unary->operation == '!')
+                {
+                    return IsTrue(Evaluate(state, *unary->operand)) ? 0.0
+                                                                    : 1.0;
+                }
+
+                throw std::runtime_error("Unknown operation.");
             }
 
             if (const auto *call =
@@ -1044,6 +1198,21 @@ namespace ForradiaLang
             return std::string(typeName.substr(5, typeName.size() - 6));
         }
 
+        bool IsNullable(std::string_view typeName)
+        {
+            return !typeName.empty() && typeName.back() == '?';
+        }
+
+        std::string UnderlyingType(std::string typeName)
+        {
+            if (IsNullable(typeName))
+            {
+                typeName.pop_back();
+            }
+
+            return typeName;
+        }
+
         ListRef MakeList(ExecutionState &state, const std::string &elementType)
         {
             const int id = state.nextListId++;
@@ -1054,7 +1223,20 @@ namespace ForradiaLang
         void ExpectElement(ExecutionState &state, const Value &value,
                            const std::string &typeName)
         {
-            if (typeName == "Int" || typeName == "Double")
+            std::string effective = typeName;
+
+            if (IsNullable(effective))
+            {
+                if (std::holds_alternative<Null>(value))
+                {
+                    return;
+                }
+
+                effective.pop_back();
+            }
+
+            if (effective == "Int" || effective == "Double" ||
+                effective == "Boolean")
             {
                 if (!std::holds_alternative<double>(value))
                 {
@@ -1064,7 +1246,7 @@ namespace ForradiaLang
                 return;
             }
 
-            if (typeName == "String")
+            if (effective == "String")
             {
                 if (!std::holds_alternative<std::string>(value))
                 {
@@ -1074,7 +1256,7 @@ namespace ForradiaLang
                 return;
             }
 
-            if (typeName == "Point")
+            if (effective == "Point")
             {
                 if (!std::holds_alternative<Point>(value))
                 {
@@ -1084,7 +1266,7 @@ namespace ForradiaLang
                 return;
             }
 
-            if (typeName == "Size")
+            if (effective == "Size")
             {
                 if (!std::holds_alternative<Size>(value))
                 {
@@ -1094,7 +1276,7 @@ namespace ForradiaLang
                 return;
             }
 
-            if (Coloring::IsColorType(typeName))
+            if (Coloring::IsColorType(effective))
             {
                 if (!std::holds_alternative<Coloring::Color>(value))
                 {
@@ -1104,7 +1286,7 @@ namespace ForradiaLang
                 return;
             }
 
-            if (IsListType(typeName))
+            if (IsListType(effective))
             {
                 const auto *list = std::get_if<ListRef>(&value);
 
@@ -1116,7 +1298,7 @@ namespace ForradiaLang
                 const auto found = state.lists.find(list->id);
 
                 if (found == state.lists.end() ||
-                    found->second.elementType != ListElementType(typeName))
+                    found->second.elementType != ListElementType(effective))
                 {
                     throw std::runtime_error("Expected a list.");
                 }
@@ -1126,7 +1308,7 @@ namespace ForradiaLang
 
             const auto *instance = std::get_if<Object>(&value);
 
-            if (instance == nullptr || instance->className != typeName)
+            if (instance == nullptr || instance->className != effective)
             {
                 throw std::runtime_error("Expected an object.");
             }
@@ -1148,7 +1330,13 @@ namespace ForradiaLang
 
         Value DefaultField(ExecutionState &state, const std::string &typeName)
         {
-            if (typeName == "Int" || typeName == "Double")
+            if (IsNullable(typeName))
+            {
+                return Null{};
+            }
+
+            if (typeName == "Int" || typeName == "Double" ||
+                typeName == "Boolean")
             {
                 return 0.0;
             }
@@ -1195,6 +1383,17 @@ namespace ForradiaLang
 
             const Value value = Evaluate(state, *field.value);
 
+            if (IsNullable(field.typeName))
+            {
+                if (std::holds_alternative<Null>(value))
+                {
+                    return value;
+                }
+
+                ExpectElement(state, value, field.typeName);
+                return value;
+            }
+
             if (field.typeName == "Point")
             {
                 if (!std::holds_alternative<Point>(value))
@@ -1215,7 +1414,8 @@ namespace ForradiaLang
                 return value;
             }
 
-            if (field.typeName == "Int" || field.typeName == "Double")
+            if (field.typeName == "Int" || field.typeName == "Double" ||
+                field.typeName == "Boolean")
             {
                 if (!std::holds_alternative<double>(value))
                 {
@@ -1292,9 +1492,74 @@ namespace ForradiaLang
             }
         }
 
-        std::optional<Value> CallObjectMethod(ExecutionState &state,
-                                              const Object &instance,
-                                              const std::string &methodName)
+        struct SavedVariable
+        {
+            std::string name;
+            bool existed{false};
+            Value value;
+        };
+
+        void BindParameters(ExecutionState &state,
+                            const FunctionDeclaration &function,
+                            const std::vector<Value> &arguments,
+                            std::vector<SavedVariable> &saved)
+        {
+            if (arguments.size() != function.parameters.size())
+            {
+                throw std::runtime_error("Unexpected arguments.");
+            }
+
+            for (std::size_t index = 0; index < arguments.size(); ++index)
+            {
+                ExpectElement(state, arguments[index],
+                              function.parameters[index].typeName);
+            }
+
+            for (const auto &parameter : function.parameters)
+            {
+                if (state.constants.contains(parameter.name))
+                {
+                    throw std::runtime_error("Cannot change a constant.");
+                }
+            }
+
+            for (std::size_t index = 0; index < arguments.size(); ++index)
+            {
+                const std::string &name = function.parameters[index].name;
+                SavedVariable savedVariable;
+                savedVariable.name = name;
+                const auto found = state.variables.find(name);
+
+                if (found != state.variables.end())
+                {
+                    savedVariable.existed = true;
+                    savedVariable.value = found->second;
+                }
+
+                state.variables[name] = arguments[index];
+                saved.push_back(std::move(savedVariable));
+            }
+        }
+
+        void RestoreParameters(ExecutionState &state,
+                               const std::vector<SavedVariable> &saved)
+        {
+            for (const auto &savedVariable : saved)
+            {
+                if (savedVariable.existed)
+                {
+                    state.variables[savedVariable.name] = savedVariable.value;
+                }
+                else
+                {
+                    state.variables.erase(savedVariable.name);
+                }
+            }
+        }
+
+        std::optional<Value> CallObjectMethod(
+            ExecutionState &state, const Object &instance,
+            const std::string &methodName, const std::vector<Value> &arguments)
         {
             const auto classInfo = state.classes.find(instance.className);
 
@@ -1315,13 +1580,16 @@ namespace ForradiaLang
             const std::string previousGroup = state.currentGroup;
             state.currentObjectId = instance.id;
             state.currentGroup.clear();
+            std::vector<SavedVariable> saved;
 
             try
             {
+                BindParameters(state, *function, arguments, saved);
                 ExecuteBlock(state, function->body);
             }
             catch (const ReturnSignal &returned)
             {
+                RestoreParameters(state, saved);
                 state.currentObjectId = previousObject;
                 state.currentGroup = previousGroup;
 
@@ -1334,11 +1602,13 @@ namespace ForradiaLang
             }
             catch (...)
             {
+                RestoreParameters(state, saved);
                 state.currentObjectId = previousObject;
                 state.currentGroup = previousGroup;
                 throw;
             }
 
+            RestoreParameters(state, saved);
             state.currentObjectId = previousObject;
             state.currentGroup = previousGroup;
             return std::nullopt;
@@ -1594,6 +1864,11 @@ namespace ForradiaLang
                     throw std::runtime_error("Cannot assign.");
                 }
 
+                if (std::holds_alternative<Null>(*parent.value))
+                {
+                    throw std::runtime_error("Expected an object.");
+                }
+
                 if (auto *size = std::get_if<Size>(parent.value))
                 {
                     if (member->memberName != "width" &&
@@ -1686,6 +1961,13 @@ namespace ForradiaLang
                     !std::holds_alternative<Size>(value))
                 {
                     throw std::runtime_error("Expected a size.");
+                }
+
+                if (IsNullable(declaration->typeName) ||
+                    state.classes.contains(
+                        UnderlyingType(declaration->typeName)))
+                {
+                    ExpectElement(state, value, declaration->typeName);
                 }
 
                 DefineName(state, declaration->name, std::move(value),
@@ -1911,7 +2193,8 @@ namespace ForradiaLang
                     throw std::runtime_error("Expected an object.");
                 }
 
-                CallObjectMethod(state, *instance, method->methodName);
+                CallObjectMethod(state, *instance, method->methodName,
+                                 EvaluateArguments(state, method->arguments));
                 return;
             }
 
@@ -1991,15 +2274,20 @@ namespace ForradiaLang
                     throw std::runtime_error("Unknown function.");
                 }
 
+                const std::vector<Value> arguments =
+                    EvaluateArguments(state, call->arguments);
                 const std::string previousGroup = state.currentGroup;
                 state.currentGroup.clear();
+                std::vector<SavedVariable> saved;
 
                 try
                 {
+                    BindParameters(state, *found->second, arguments, saved);
                     ExecuteBlock(state, found->second->body);
                 }
                 catch (const ReturnSignal &returned)
                 {
+                    RestoreParameters(state, saved);
                     state.currentGroup = previousGroup;
 
                     if (!found->second->returnType.empty())
@@ -2012,10 +2300,12 @@ namespace ForradiaLang
                 }
                 catch (...)
                 {
+                    RestoreParameters(state, saved);
                     state.currentGroup = previousGroup;
                     throw;
                 }
 
+                RestoreParameters(state, saved);
                 state.currentGroup = previousGroup;
                 return;
             }
@@ -2234,6 +2524,8 @@ namespace ForradiaLang
             state.variables["FRD_Windowed"] = Graphics::WindowedFlag();
             state.variables["True"] = 1.0;
             state.variables["False"] = 0.0;
+            state.variables["Nothing"] = Null{};
+            state.constants.insert("Nothing");
 
             RegisterFunctions(state, statements);
             ExecuteBlock(state, statements);

@@ -7,4 +7,12 @@ Fn ClearWithGrass
     WorldArea worldArea = gWorld.currentWorldArea
 
     Size size = worldArea.GetSize
+
+    For y = 0 To size.height - 1
+        For x = 0 To size.width - 1
+            Tile? tile = worldArea.GetTile(x, y)
+
+            tile.groundType = "GroundGrass"
+        Next
+    Next
 End

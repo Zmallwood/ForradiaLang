@@ -9,5 +9,7 @@ namespace ForradiaLang
       public:
         std::unique_ptr<Expression> object;
         std::string memberName;
+        std::vector<std::unique_ptr<Expression>> arguments;
+        bool isCall{false};
     };
 }
