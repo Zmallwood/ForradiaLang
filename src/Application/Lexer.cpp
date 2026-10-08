@@ -47,6 +47,11 @@ namespace ForradiaLang
                 return TokenTypes::And;
             }
 
+            if (word == "Or")
+            {
+                return TokenTypes::Or;
+            }
+
             if (word == "End")
             {
                 return TokenTypes::End;
@@ -80,6 +85,11 @@ namespace ForradiaLang
             if (word == "Next")
             {
                 return TokenTypes::Next;
+            }
+
+            if (word == "Continue")
+            {
+                return TokenTypes::Continue;
             }
 
             if (word == "Fn")
@@ -241,6 +251,14 @@ namespace ForradiaLang
                 source[index + 1] == '=')
             {
                 tokens.push_back({TokenTypes::Equals, "=="});
+                index += 2;
+                continue;
+            }
+
+            if (character == '>' && index + 1 < source.size() &&
+                source[index + 1] == '=')
+            {
+                tokens.push_back({TokenTypes::GreaterOrEqual, ">="});
                 index += 2;
                 continue;
             }

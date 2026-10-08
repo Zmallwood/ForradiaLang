@@ -7,6 +7,7 @@
 #include "Expressions/StringExpression.hpp"
 #include "Expressions/VariableExpression.hpp"
 #include "Statements/ClassDeclaration.hpp"
+#include "Statements/ContinueStatement.hpp"
 #include "Statements/ForStatement.hpp"
 #include "Statements/FunctionCall.hpp"
 #include "Statements/FunctionDeclaration.hpp"
@@ -73,6 +74,7 @@ namespace ForradiaLang
         {
             return type == TokenTypes::Equals ||
                    type == TokenTypes::GreaterThan ||
+                   type == TokenTypes::GreaterOrEqual ||
                    type == TokenTypes::LessThan;
         }
 
@@ -253,7 +255,14 @@ namespace ForradiaLang
 
             while (!AtEnd(state) && IsComparison(Peek(state).type))
             {
-                const char operation = Advance(state).value[0];
+                const Token &token = Advance(state);
+                char operation = token.value[0];
+
+                if (token.type == TokenTypes::GreaterOrEqual)
+                {
+                    operation = 'G';
+                }
+
                 auto binary = std::make_unique<BinaryExpression>();
                 binary->left = std::move(expression);
                 binary->operation = operation;
@@ -264,7 +273,7 @@ namespace ForradiaLang
             return expression;
         }
 
-        std::unique_ptr<Expression> ParseExpression(ParseState &state)
+        std::unique_ptr<Expression> ParseAnd(ParseState &state)
         {
             auto expression = ParseComparison(state);
 
@@ -282,6 +291,24 @@ namespace ForradiaLang
             return expression;
         }
 
+        std::unique_ptr<Expression> ParseExpression(ParseState &state)
+        {
+            auto expression = ParseAnd(state);
+
+            while (!AtEnd(state) && Peek(state).type == TokenTypes::Or)
+            {
+                Advance(state);
+
+                auto binary = std::make_unique<BinaryExpression>();
+                binary->left = std::move(expression);
+                binary->operation = '|';
+                binary->right = ParseAnd(state);
+                expression = std::move(binary);
+            }
+
+            return expression;
+        }
+
         bool CanStartExpression(TokenTypes type)
         {
             return type == TokenTypes::Number ||
@@ -292,12 +319,17 @@ namespace ForradiaLang
                    type == TokenTypes::LeftBracket;
         }
 
-        bool FollowedByComma(const ParseState &state)
+        bool FollowedBy(const ParseState &state, TokenTypes type)
         {
             const std::size_t next = state.index + 1;
 
             return next < state.tokens.size() &&
-                   state.tokens[next].type == TokenTypes::Comma;
+                   state.tokens[next].type == type;
+        }
+
+        bool FollowedByComma(const ParseState &state)
+        {
+            return FollowedBy(state, TokenTypes::Comma);
         }
 
         std::vector<std::unique_ptr<Expression>>
@@ -503,6 +535,10 @@ namespace ForradiaLang
             case TokenTypes::Print:
                 return ParsePrintStatement(state);
 
+            case TokenTypes::Continue:
+                Advance(state);
+                return std::make_unique<ContinueStatement>();
+
             case TokenTypes::Identifier:
                 return ParseIdentifierStatement(state);
 
@@ -542,6 +578,16 @@ namespace ForradiaLang
             if (!AtEnd(state) && Peek(state).type == TokenTypes::Identifier &&
                 !FollowedByComma(state))
             {
+                if (FollowedBy(state, TokenTypes::Equals))
+                {
+                    auto statement = std::make_unique<IntStatement>();
+                    statement->typeName = name;
+                    statement->name = Advance(state).value;
+                    Expect(state, TokenTypes::Equals, "Expected '='.");
+                    statement->value = ParseExpression(state);
+                    return statement;
+                }
+
                 auto statement = std::make_unique<ObjectStatement>();
                 statement->typeName = name;
                 statement->name = Advance(state).value;

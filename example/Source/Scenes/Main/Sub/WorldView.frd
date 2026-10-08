@@ -8,8 +8,17 @@ Class WorldView
         Double tileWidth = 0.05
         Double tileHeight = ConvertWidthToHeight(0.05)
 
+        Point playerPosition = gPlayer.position
+
         For y = 0 To 10
             For x = 0 To 10
+                Int xCoordinate = playerPosition.x - 5 + x
+                Int yCoordinate = playerPosition.y - 5 + y
+
+                If xCoordinate < 0 Or yCoordinate < 0 Or xCoordinate >= 100 Or yCoordinate >= 100 Then
+                    Continue
+                End
+
                 Double xPx = 0.5 - tileWidth/2 + x*tileWidth/2 - y*tileWidth/2
                 Double yPx = 0.5 - 5.5*tileHeight + x*tileHeight/2 + y*tileHeight/2
                 Double widthPx = tileWidth

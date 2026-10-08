@@ -13,6 +13,7 @@
 #include "Graphics.hpp"
 #include "ScenesCore.hpp"
 #include "Statements/ClassDeclaration.hpp"
+#include "Statements/ContinueStatement.hpp"
 #include "Statements/ForStatement.hpp"
 #include "Statements/FunctionCall.hpp"
 #include "Statements/FunctionDeclaration.hpp"
@@ -177,6 +178,10 @@ namespace ForradiaLang
             ExecutionState &state,
             const std::vector<std::unique_ptr<Statement>> &statements);
 
+        struct ContinueSignal
+        {
+        };
+
         void ExecuteStatement(ExecutionState &state,
                               const Statement &statement);
 
@@ -188,6 +193,16 @@ namespace ForradiaLang
                 if (!IsTrue(Evaluate(state, *expression.left)))
                 {
                     return 0.0;
+                }
+
+                return IsTrue(Evaluate(state, *expression.right)) ? 1.0 : 0.0;
+            }
+
+            if (expression.operation == '|')
+            {
+                if (IsTrue(Evaluate(state, *expression.left)))
+                {
+                    return 1.0;
                 }
 
                 return IsTrue(Evaluate(state, *expression.right)) ? 1.0 : 0.0;
@@ -217,6 +232,9 @@ namespace ForradiaLang
 
             case '>':
                 return left > right ? 1.0 : 0.0;
+
+            case 'G':
+                return left >= right ? 1.0 : 0.0;
 
             case '<':
                 return left < right ? 1.0 : 0.0;
@@ -694,8 +712,15 @@ namespace ForradiaLang
             if (const auto *declaration =
                     dynamic_cast<const IntStatement *>(&statement))
             {
-                state.variables[declaration->name] =
-                    Evaluate(state, *declaration->value);
+                Value value = Evaluate(state, *declaration->value);
+
+                if (declaration->typeName == "Point" &&
+                    !std::holds_alternative<Point>(value))
+                {
+                    throw std::runtime_error("Expected a point.");
+                }
+
+                state.variables[declaration->name] = std::move(value);
                 return;
             }
 
@@ -708,10 +733,22 @@ namespace ForradiaLang
                 for (double value = start; value <= end; value += 1.0)
                 {
                     state.variables[loop->name] = value;
-                    ExecuteBlock(state, loop->body);
+
+                    try
+                    {
+                        ExecuteBlock(state, loop->body);
+                    }
+                    catch (const ContinueSignal &)
+                    {
+                    }
                 }
 
                 return;
+            }
+
+            if (dynamic_cast<const ContinueStatement *>(&statement))
+            {
+                throw ContinueSignal{};
             }
 
             if (const auto *print =
@@ -1129,20 +1166,27 @@ namespace ForradiaLang
             }
         } guard;
 
-        ExecutionState state;
-        state.sourceDirectory = sourceDirectory;
-        state.variables["FRD_Fullscreen"] = Graphics::FullscreenFlag();
-        state.variables["FRD_Windowed"] = Graphics::WindowedFlag();
-        state.variables["True"] = 1.0;
-        state.variables["False"] = 0.0;
+        try
+        {
+            ExecutionState state;
+            state.sourceDirectory = sourceDirectory;
+            state.variables["FRD_Fullscreen"] = Graphics::FullscreenFlag();
+            state.variables["FRD_Windowed"] = Graphics::WindowedFlag();
+            state.variables["True"] = 1.0;
+            state.variables["False"] = 0.0;
 
-        RegisterFunctions(state, statements);
-        ExecuteBlock(state, statements);
-        std::cout.flush();
-        Graphics::RunUntilClosed(
-            [&state]() { RunSceneUpdate(state); },
-            [&state]() { RunSceneDraw(state); },
-            [&state](int button) { RunSceneMouseDown(state, button); },
-            [&state](int key) { RunSceneKeyDown(state, key); });
+            RegisterFunctions(state, statements);
+            ExecuteBlock(state, statements);
+            std::cout.flush();
+            Graphics::RunUntilClosed(
+                [&state]() { RunSceneUpdate(state); },
+                [&state]() { RunSceneDraw(state); },
+                [&state](int button) { RunSceneMouseDown(state, button); },
+                [&state](int key) { RunSceneKeyDown(state, key); });
+        }
+        catch (const ContinueSignal &)
+        {
+            throw std::runtime_error("Unexpected statement.");
+        }
     }
 }
