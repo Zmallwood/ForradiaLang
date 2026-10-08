@@ -5,9 +5,7 @@ Import Sub.ClearWithGrass
 Import Sub.GenerateWater
 
 Fn GenerateNewWorld
-    Print "Generating new world"
-
     ClearWithGrass
-    
+
     GenerateWater
 End

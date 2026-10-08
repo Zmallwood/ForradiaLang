@@ -3,5 +3,4 @@
 
 Import Game
 
-Game game
-game.Start
+gGame.Start
