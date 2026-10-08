@@ -5,6 +5,14 @@ Scene MainMenuScene
     Update
     End
 
+    OnMouseDown(MouseButtons button)
+        GoToScene "WorldGenerationScene"
+    End
+
+    OnKeyDown(Keys key)
+        GoToScene "WorldGenerationScene"
+    End
+
     Draw
         DrawImage "DefaultSceneBackground" 0.0 0.0 1.0 1.0
 

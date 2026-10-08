@@ -97,6 +97,11 @@ namespace ForradiaLang
                 return TokenTypes::OnKeyDown;
             }
 
+            if (word == "OnEnter")
+            {
+                return TokenTypes::OnEnter;
+            }
+
             return TokenTypes::Identifier;
         }
     }

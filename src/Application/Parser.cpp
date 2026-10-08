@@ -663,6 +663,14 @@ namespace ForradiaLang
                     continue;
                 }
 
+                if (Peek(state).type == TokenTypes::OnEnter)
+                {
+                    Advance(state);
+                    declaration->onEnter = ParseBlock(state, false);
+                    Expect(state, TokenTypes::End, "Expected 'End'.");
+                    continue;
+                }
+
                 throw std::runtime_error("Unexpected token.");
             }
 

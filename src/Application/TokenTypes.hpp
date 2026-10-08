@@ -34,6 +34,7 @@ namespace ForradiaLang
         Update,
         Draw,
         OnMouseDown,
-        OnKeyDown
+        OnKeyDown,
+        OnEnter
     };
 }

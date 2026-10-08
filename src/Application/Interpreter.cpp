@@ -50,6 +50,7 @@ namespace ForradiaLang
             const std::vector<std::unique_ptr<Statement>> *onMouseDown{
                 nullptr};
             const std::vector<std::unique_ptr<Statement>> *onKeyDown{nullptr};
+            const std::vector<std::unique_ptr<Statement>> *onEnter{nullptr};
             std::string onMouseDownParameter;
             std::string onKeyDownParameter;
         };
@@ -139,6 +140,10 @@ namespace ForradiaLang
         }
 
         Value Evaluate(ExecutionState &state, const Expression &expression);
+
+        void ExecuteBlock(
+            ExecutionState &state,
+            const std::vector<std::unique_ptr<Statement>> &statements);
 
         void ExecuteStatement(ExecutionState &state,
                               const Statement &statement);
@@ -488,6 +493,18 @@ namespace ForradiaLang
             }
 
             state.currentSceneType = found->second;
+
+            const auto sceneType =
+                state.sceneTypes.find(state.currentSceneType);
+
+            if (sceneType == state.sceneTypes.end() ||
+                sceneType->second.onEnter == nullptr)
+            {
+                return;
+            }
+
+            ExecuteBlock(state, *sceneType->second.onEnter);
+            std::cout.flush();
         }
 
         void
@@ -751,8 +768,12 @@ namespace ForradiaLang
                         dynamic_cast<const SceneDeclaration *>(statement.get()))
                 {
                     state.sceneTypes[scene->name] = SceneType{
-                        &scene->update, &scene->draw, &scene->onMouseDown,
-                        &scene->onKeyDown, scene->onMouseDownParameter,
+                        &scene->update,
+                        &scene->draw,
+                        &scene->onMouseDown,
+                        &scene->onKeyDown,
+                        &scene->onEnter,
+                        scene->onMouseDownParameter,
                         scene->onKeyDownParameter};
                 }
             }
