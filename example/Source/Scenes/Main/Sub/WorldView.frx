@@ -11,6 +11,8 @@ Class WorldView
 
         Point playerPosition = gPlayer.position
 
+        WorldArea worldArea = gWorld.currentWorldArea
+
         For y = 0 To 10
             For x = 0 To 10
                 Int xCoordinate = playerPosition.x - 5 + x

@@ -3,4 +3,5 @@
 
 Class Tile
     String ground = ""
+    Int elevation = 0
 End
