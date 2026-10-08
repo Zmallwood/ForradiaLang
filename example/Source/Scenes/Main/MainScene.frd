@@ -8,3 +8,5 @@ Scene MainScene
     Draw
     End
 End
+
+MainScene gMainScene

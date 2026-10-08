@@ -24,3 +24,5 @@ Scene IntroScene
         End
     End
 End
+
+IntroScene gIntroScene

@@ -12,3 +12,5 @@ Scene WorldGenerationScene
         Print "Generating world"
     End
 End
+
+WorldGenerationScene gWorldGenerationScene
