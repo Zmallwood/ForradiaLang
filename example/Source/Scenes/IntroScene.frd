@@ -1,0 +1,18 @@
+' Copyright (c) 2026 Andreas Åkerberg
+' SPDX-License-Identifier: MIT
+
+Scene IntroScene
+    Update
+        ' Print "Test"
+    End
+
+    Draw
+        DrawImage "DefaultSceneBackground" 0.0 0.0 1.0 1.0
+
+        DrawImage "ForradiaLogo" 0.2 0.2 0.6 0.3
+
+        If (Now() % 800) < 400 Then
+            DrawString "Press to start" 0.5 0.5 18 True
+        End
+    End
+End

@@ -1,0 +1,35 @@
+' Copyright (c) 2026 Andreas Åkerberg
+' SPDX-License-Identifier: MIT
+
+Import Scenes.IntroScene
+Import Scenes.MainMenuScene
+
+Fn SayHello
+    Print "Hello!"
+End
+
+Class Game
+    Fn Start
+        Print "Starting game"
+
+        InitializeGraphics 0, 0, 0, 0, FRD_Fullscreen, "Forradia"
+
+        LoadImages "../Resources/Images"
+
+        InitializeText "../Resources/Fonts/PixeloidSans.ttf"
+
+        AddFontSizes [12, 18, 24]
+
+        Color clearColor(0.0, 0.5, 1.0, 1.0)
+
+        SetClearColor clearColor
+
+        IntroScene introScene
+        MainMenuScene mainMenuScene
+
+        AddScene "IntroScene" introScene
+        AddScene "MainMenuScene" mainMenuScene
+
+        GoToScene "IntroScene"
+    End
+End
