@@ -16,7 +16,7 @@ Class Game
 
         AddFontSizes [12, 18, 24]
 
-        Color clearColor(0.0, 0.7, 1.0, 1.0)
+        ColorD clearColor(0.0, 0.7, 1.0, 1.0)
 
         SetClearColor clearColor
 

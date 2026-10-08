@@ -57,6 +57,26 @@ namespace ForradiaLang
                 return TokenTypes::Int;
             }
 
+            if (word == "Double")
+            {
+                return TokenTypes::Double;
+            }
+
+            if (word == "For")
+            {
+                return TokenTypes::For;
+            }
+
+            if (word == "To")
+            {
+                return TokenTypes::To;
+            }
+
+            if (word == "Next")
+            {
+                return TokenTypes::Next;
+            }
+
             if (word == "Fn")
             {
                 return TokenTypes::Fn;
@@ -80,11 +100,6 @@ namespace ForradiaLang
             if (word == "Update")
             {
                 return TokenTypes::Update;
-            }
-
-            if (word == "Draw")
-            {
-                return TokenTypes::Draw;
             }
 
             if (word == "OnMouseDown")
@@ -237,6 +252,16 @@ namespace ForradiaLang
 
             case '-':
                 type = TokenTypes::Minus;
+                matched = true;
+                break;
+
+            case '*':
+                type = TokenTypes::Star;
+                matched = true;
+                break;
+
+            case '/':
+                type = TokenTypes::Slash;
                 matched = true;
                 break;
 

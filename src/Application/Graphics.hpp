@@ -33,6 +33,8 @@ namespace ForradiaLang
         void DrawImage(std::string_view name, double x, double y,
                        double width, double height);
 
+        double ConvertWidthToHeight(double width);
+
         void DrawString(std::string_view text, double x, double y,
                         int fontSize, bool centered);
 

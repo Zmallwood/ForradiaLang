@@ -1,0 +1,22 @@
+' Copyright (c) 2026 Andreas Åkerberg
+' SPDX-License-Identifier: MIT
+
+Class WorldView
+    Fn Draw
+        Double tileWidth = 0.05
+        Double tileHeight = ConvertWidthToHeight(0.05)
+
+        For y = 0 To 10
+            For x = 0 To 10
+                Double xPx = 0.5 - tileWidth/2 + x*tileWidth/2 - y*tileWidth/2
+                Double yPx = 0.5 - 5.5*tileHeight + x*tileHeight/2 + y*tileHeight/2
+                Double widthPx = tileWidth
+                Double heightPx = tileHeight
+
+                DrawImage "GroundGrass", xPx, yPx, widthPx, heightPx
+            Next
+        Next
+    End
+End
+
+WorldView gWorldView

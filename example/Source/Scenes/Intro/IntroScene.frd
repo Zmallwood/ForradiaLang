@@ -3,7 +3,6 @@
 
 Scene IntroScene
     Update
-        ' Print "Test"
     End
 
     OnMouseDown(MouseButtons button)

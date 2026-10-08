@@ -7,6 +7,7 @@
 #include "Expressions/StringExpression.hpp"
 #include "Expressions/VariableExpression.hpp"
 #include "Statements/ClassDeclaration.hpp"
+#include "Statements/ForStatement.hpp"
 #include "Statements/FunctionCall.hpp"
 #include "Statements/FunctionDeclaration.hpp"
 #include "Statements/IfStatement.hpp"
@@ -82,7 +83,8 @@ namespace ForradiaLang
 
         bool IsMultiplication(TokenTypes type)
         {
-            return type == TokenTypes::Percent;
+            return type == TokenTypes::Star || type == TokenTypes::Slash ||
+                   type == TokenTypes::Percent;
         }
 
         void ParseOptionalParameters(ParseState &state)
@@ -380,6 +382,35 @@ namespace ForradiaLang
             return statement;
         }
 
+        std::unique_ptr<Statement> ParseForStatement(ParseState &state)
+        {
+            Advance(state);
+
+            auto statement = std::make_unique<ForStatement>();
+            statement->name =
+                Expect(state, TokenTypes::Identifier, "Expected a name.").value;
+
+            Expect(state, TokenTypes::Equals, "Expected '='.");
+            statement->start = ParseExpression(state);
+            Expect(state, TokenTypes::To, "Expected 'To'.");
+            statement->end = ParseExpression(state);
+
+            while (!AtEnd(state))
+            {
+                SkipNewlines(state);
+
+                if (AtEnd(state) || Peek(state).type == TokenTypes::Next)
+                {
+                    break;
+                }
+
+                statement->body.push_back(ParseStatement(state));
+            }
+
+            Expect(state, TokenTypes::Next, "Expected 'Next'.");
+            return statement;
+        }
+
         std::unique_ptr<Statement> ParsePrintStatement(ParseState &state)
         {
             Advance(state);
@@ -436,7 +467,11 @@ namespace ForradiaLang
             switch (Peek(state).type)
             {
             case TokenTypes::Int:
+            case TokenTypes::Double:
                 return ParseIntStatement(state);
+
+            case TokenTypes::For:
+                return ParseForStatement(state);
 
             case TokenTypes::If:
                 return ParseIfStatement(state);
@@ -591,7 +626,8 @@ namespace ForradiaLang
                     continue;
                 }
 
-                if (Peek(state).type == TokenTypes::Draw)
+                if (Peek(state).type == TokenTypes::Identifier &&
+                    Peek(state).value == "Draw")
                 {
                     Advance(state);
                     declaration->draw = ParseBlock(state, false);

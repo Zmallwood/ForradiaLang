@@ -1,6 +1,8 @@
 ' Copyright (c) 2026 Andreas Åkerberg
 ' SPDX-License-Identifier: MIT
 
+Import Sub.GenerateNewWorld
+
 Scene WorldGenerationScene
     Update
     End
@@ -9,7 +11,9 @@ Scene WorldGenerationScene
     End
 
     OnEnter
-        Print "Generating world"
+        GenerateNewWorld
+
+        GoToScene "MainScene"
     End
 End
 

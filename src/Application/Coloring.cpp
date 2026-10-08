@@ -9,6 +9,6 @@ namespace ForradiaLang
 
     bool Coloring::IsColorType(std::string_view name)
     {
-        return name == "Color";
+        return name == "ColorD";
     }
 }

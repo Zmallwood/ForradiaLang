@@ -13,6 +13,7 @@
 #include "Graphics.hpp"
 #include "ScenesCore.hpp"
 #include "Statements/ClassDeclaration.hpp"
+#include "Statements/ForStatement.hpp"
 #include "Statements/FunctionCall.hpp"
 #include "Statements/FunctionDeclaration.hpp"
 #include "Statements/IfStatement.hpp"
@@ -162,6 +163,17 @@ namespace ForradiaLang
             case '-':
                 return left - right;
 
+            case '*':
+                return left * right;
+
+            case '/':
+                if (right == 0.0)
+                {
+                    throw std::runtime_error("Expected a non-zero number.");
+                }
+
+                return left / right;
+
             case '>':
                 return left > right ? 1.0 : 0.0;
 
@@ -195,6 +207,19 @@ namespace ForradiaLang
                 }
 
                 return static_cast<double>(SDL_GetTicks());
+            }
+
+            if (expression.name == "ConvertWidthToHeight")
+            {
+                if (expression.arguments.size() != 1)
+                {
+                    throw std::runtime_error("Expected one argument.");
+                }
+
+                const double width =
+                    AsNumber(Evaluate(state, *expression.arguments[0]));
+
+                return Graphics::ConvertWidthToHeight(width);
             }
 
             throw std::runtime_error("Unknown function.");
@@ -524,6 +549,21 @@ namespace ForradiaLang
             {
                 state.variables[declaration->name] =
                     Evaluate(state, *declaration->value);
+                return;
+            }
+
+            if (const auto *loop =
+                    dynamic_cast<const ForStatement *>(&statement))
+            {
+                const double start = AsNumber(Evaluate(state, *loop->start));
+                const double end = AsNumber(Evaluate(state, *loop->end));
+
+                for (double value = start; value <= end; value += 1.0)
+                {
+                    state.variables[loop->name] = value;
+                    ExecuteBlock(state, loop->body);
+                }
+
                 return;
             }
 

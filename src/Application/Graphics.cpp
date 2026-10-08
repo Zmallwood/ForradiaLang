@@ -1010,6 +1010,27 @@ namespace ForradiaLang
         }
     }
 
+    double Graphics::ConvertWidthToHeight(double width)
+    {
+        if (renderer == nullptr)
+        {
+            throw std::runtime_error("Could not convert width to height.");
+        }
+
+        int canvasWidth = 0;
+        int canvasHeight = 0;
+
+        if (SDL_GetRendererOutputSize(renderer, &canvasWidth, &canvasHeight) !=
+                0 ||
+            canvasWidth <= 0 || canvasHeight <= 0)
+        {
+            throw std::runtime_error("Could not convert width to height.");
+        }
+
+        return width * static_cast<double>(canvasWidth) /
+               static_cast<double>(canvasHeight);
+    }
+
     void Graphics::RunUntilClosed(const std::function<void()> &update,
                                   const std::function<void()> &draw,
                                   const std::function<void(int)> &onMouseDown,
