@@ -14,9 +14,9 @@ Scene MainMenuScene
     End
 
     Draw
-        DrawImage "DefaultSceneBackground" 0.0 0.0 1.0 1.0
+        DrawImage "DefaultSceneBackground", 0.0, 0.0, 1.0, 1.0
 
-        DrawImage "ForradiaLogo" 0.3 0.1 0.4 0.2
+        DrawImage "ForradiaLogo", 0.3, 0.1, 0.4, 0.2
     End
 End
 

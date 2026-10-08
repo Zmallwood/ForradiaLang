@@ -25,10 +25,10 @@ Class Game
 
         SetDefaultCursorStyle "Default"
 
-        AddScene "IntroScene" gIntroScene
-        AddScene "MainMenuScene" gMainMenuScene
-        AddScene "WorldGenerationScene" gWorldGenerationScene
-        AddScene "MainScene" gMainScene
+        AddScene "IntroScene", gIntroScene
+        AddScene "MainMenuScene", gMainMenuScene
+        AddScene "WorldGenerationScene", gWorldGenerationScene
+        AddScene "MainScene", gMainScene
 
         GoToScene "IntroScene"
     End

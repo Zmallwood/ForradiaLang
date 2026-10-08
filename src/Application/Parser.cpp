@@ -469,11 +469,12 @@ namespace ForradiaLang
                     continue;
                 }
 
-                if (parenthesized ||
-                    !CanStartExpression(Peek(state).type))
+                if (CanStartExpression(Peek(state).type))
                 {
-                    break;
+                    throw std::runtime_error("Expected ','.");
                 }
+
+                break;
             }
 
             if (parenthesized)

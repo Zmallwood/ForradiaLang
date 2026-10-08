@@ -14,12 +14,12 @@ Scene IntroScene
     End
 
     Draw
-        DrawImage "DefaultSceneBackground" 0.0 0.0 1.0 1.0
+        DrawImage "DefaultSceneBackground", 0.0, 0.0, 1.0, 1.0
 
-        DrawImage "ForradiaLogo" 0.2 0.2 0.6 0.3
+        DrawImage "ForradiaLogo", 0.2, 0.2, 0.6, 0.3
 
         If (Now() % 800) < 400 Then
-            DrawString "Press to start" 0.5 0.5 18 True
+            DrawString "Press to start", 0.5, 0.5, 18, True
         End
     End
 End

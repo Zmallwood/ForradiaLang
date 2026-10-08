@@ -53,7 +53,7 @@ namespace ForradiaLang
                 }
             }
 
-            return directory / (relative + ".for");
+            return directory / (relative + ".frx");
         }
 
         std::filesystem::path

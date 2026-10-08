@@ -1,5 +1,5 @@
 cd ../bin/
 
-.\ForradiaLang.exe ../example/Source/Start.for
+.\ForradiaLang.exe ../example/Source/Start.frx
 
 cd ../scripts/

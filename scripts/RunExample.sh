@@ -2,4 +2,4 @@
 
 cd ../bin/
 
-./ForradiaLang ../example/Source/Start.for
+./ForradiaLang ../example/Source/Start.frx
