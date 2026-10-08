@@ -1135,7 +1135,8 @@ namespace ForradiaLang
     void Graphics::RunUntilClosed(const std::function<void()> &update,
                                   const std::function<void()> &draw,
                                   const std::function<void(int)> &onMouseDown,
-                                  const std::function<void(int)> &onKeyDown)
+                                  const std::function<void(int)> &onKeyDown,
+                                  const std::function<void(int)> &onKeyUp)
     {
         if (window == nullptr)
         {
@@ -1191,7 +1192,12 @@ namespace ForradiaLang
                 }
                 else if (event.type == SDL_KEYUP)
                 {
-                    pressedKeys.erase(event.key.keysym.sym);
+                    const SDL_Keycode key = event.key.keysym.sym;
+
+                    if (pressedKeys.erase(key) > 0 && onKeyUp)
+                    {
+                        onKeyUp(static_cast<int>(key));
+                    }
                 }
             }
 

@@ -2,9 +2,19 @@
 ' SPDX-License-Identifier: MIT
 
 Import Sub.WorldView
+Import Sub.KeyboardMovement
 
 Scene MainScene
     Update
+        gKeyboardMovement.Update
+    End
+
+    OnKeyDown(Keys key)
+        gKeyboardMovement.OnKeyDown key
+    End
+
+    OnKeyUp(Keys key)
+        gKeyboardMovement.OnKeyUp key
     End
 
     Draw

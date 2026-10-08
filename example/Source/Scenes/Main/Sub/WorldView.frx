@@ -42,7 +42,10 @@ Class WorldView
                 Double widthPx = tileWidth + kSmallValue
                 Double heightPx = tileHeight + kSmallValue
 
-                If xPx + widthPx < 0.0 Or yPx + heightPx < 0.0 Or xPx > 1.0 Or yPx > 1.0 Then
+                If xPx + widthPx < 0.0 Or _
+                    yPx + heightPx < 0.0 Or _
+                    xPx > 1.0 Or _
+                    yPx > 1.0 Then
                     Continue
                 End
                 

@@ -89,12 +89,19 @@ namespace ForradiaLang
             const std::vector<std::unique_ptr<Statement>> *onMouseDown{
                 nullptr};
             const std::vector<std::unique_ptr<Statement>> *onKeyDown{nullptr};
+            const std::vector<std::unique_ptr<Statement>> *onKeyUp{nullptr};
             const std::vector<std::unique_ptr<Statement>> *onEnter{nullptr};
             std::string onMouseDownParameter;
             std::string onKeyDownParameter;
+            std::string onKeyUpParameter;
         };
 
         struct ListRef
+        {
+            int id{0};
+        };
+
+        struct SetRef
         {
             int id{0};
         };
@@ -105,7 +112,7 @@ namespace ForradiaLang
 
         using Value = std::variant<double, std::string, Object, Coloring::Color,
                                    SceneObject, std::vector<double>, Point, Size,
-                                   GroupRef, ListRef, Null>;
+                                   GroupRef, ListRef, SetRef, Null>;
 
         enum class ControlFlow
         {
@@ -115,6 +122,12 @@ namespace ForradiaLang
         };
 
         struct ListData
+        {
+            std::string elementType;
+            std::vector<Value> elements;
+        };
+
+        struct SetData
         {
             std::string elementType;
             std::vector<Value> elements;
@@ -140,6 +153,7 @@ namespace ForradiaLang
             std::filesystem::path sourceDirectory;
             int nextObjectId{1};
             int nextListId{1};
+            int nextSetId{1};
             int currentObjectId{0};
             ControlFlow controlFlow{ControlFlow::None};
             Value returnValue{Null{}};
@@ -148,6 +162,7 @@ namespace ForradiaLang
             std::unordered_map<int, std::unordered_map<std::string, Value>>
                 objectFields;
             std::unordered_map<int, ListData> lists;
+            std::unordered_map<int, SetData> sets;
         };
 
         const std::string &ObjectClassName(const ExecutionState &state,
@@ -321,6 +336,11 @@ namespace ForradiaLang
                          const std::string &methodName,
                          const std::vector<Value> &arguments);
 
+        std::optional<Value>
+        CallGlobalFunction(ExecutionState &state,
+                           const FunctionDeclaration &function,
+                           const std::vector<Value> &arguments);
+
         Value LookupName(ExecutionState &state, const std::string &name)
         {
             if (!state.currentGroup.empty())
@@ -400,10 +420,19 @@ namespace ForradiaLang
 
         bool IsListType(std::string_view typeName);
 
+        bool IsSetType(std::string_view typeName);
+
         std::string ListElementType(std::string_view typeName);
+
+        std::string SetElementType(std::string_view typeName);
 
         ListRef MakeList(ExecutionState &state,
                          const std::string &elementType);
+
+        SetRef MakeSet(ExecutionState &state, const std::string &elementType);
+
+        bool SetContains(ExecutionState &state, const SetRef &set,
+                         const Value &element);
 
         void ExecuteBlock(
             ExecutionState &state,
@@ -619,6 +648,17 @@ namespace ForradiaLang
                 return static_cast<double>(SDL_GetTicks());
             }
 
+            if (expression.name == "CInt")
+            {
+                if (expression.arguments.size() != 1)
+                {
+                    throw std::runtime_error("Expected one argument.");
+                }
+
+                return std::trunc(
+                    AsNumber(Evaluate(state, *expression.arguments[0])));
+            }
+
             if (expression.name == "RandomInt")
             {
                 if (expression.arguments.size() != 2)
@@ -685,6 +725,16 @@ namespace ForradiaLang
                 return MakeList(state, ListElementType(expression.name));
             }
 
+            if (IsSetType(expression.name))
+            {
+                if (!expression.arguments.empty())
+                {
+                    throw std::runtime_error("Unexpected arguments.");
+                }
+
+                return MakeSet(state, SetElementType(expression.name));
+            }
+
             if (state.classes.contains(expression.name))
             {
                 if (!expression.arguments.empty())
@@ -735,7 +785,35 @@ namespace ForradiaLang
                 }
             }
 
-            throw std::runtime_error("Unknown function.");
+            const auto found = state.functions.find(expression.name);
+
+            if (found == state.functions.end())
+            {
+                throw std::runtime_error("Unknown function.");
+            }
+
+            const std::vector<Value> &arguments =
+                PushArguments(state, expression.arguments);
+            std::optional<Value> result;
+
+            try
+            {
+                result = CallGlobalFunction(state, *found->second, arguments);
+            }
+            catch (...)
+            {
+                PopArguments(state);
+                throw;
+            }
+
+            PopArguments(state);
+
+            if (!result.has_value())
+            {
+                throw std::runtime_error("Expected a value.");
+            }
+
+            return *result;
         }
 
         std::size_t AsIndex(const Value &value)
@@ -953,6 +1031,42 @@ namespace ForradiaLang
                 }
 
                 return static_cast<double>(found->second.elements.size());
+            }
+
+            if (const auto *set = std::get_if<SetRef>(&object))
+            {
+                if (!expression.isCall)
+                {
+                    if (expression.memberName != "Count")
+                    {
+                        throw std::runtime_error("Unknown member.");
+                    }
+
+                    const auto found = state.sets.find(set->id);
+
+                    if (found == state.sets.end())
+                    {
+                        throw std::runtime_error("Expected a set.");
+                    }
+
+                    return static_cast<double>(found->second.elements.size());
+                }
+
+                if (expression.memberName == "Contains")
+                {
+                    if (expression.arguments.size() != 1)
+                    {
+                        throw std::runtime_error("Expected one argument.");
+                    }
+
+                    return SetContains(
+                               state, *set,
+                               Evaluate(state, *expression.arguments[0]))
+                               ? 1.0
+                               : 0.0;
+                }
+
+                throw std::runtime_error("Unknown member.");
             }
 
             if (const auto *instance = std::get_if<Object>(&object))
@@ -1309,17 +1423,19 @@ namespace ForradiaLang
             std::cout.flush();
         }
 
-        bool IsListType(std::string_view typeName)
+        bool IsGenericType(std::string_view typeName, std::string_view prefix)
         {
-            if (!typeName.starts_with("List<") || typeName.size() < 7 ||
-                typeName.back() != '>')
+            if (!typeName.starts_with(prefix) ||
+                typeName.size() < prefix.size() + 3 || typeName.back() != '>' ||
+                typeName[prefix.size()] != '<')
             {
                 return false;
             }
 
             int depth = 0;
 
-            for (std::size_t index = 4; index < typeName.size(); ++index)
+            for (std::size_t index = prefix.size(); index < typeName.size();
+                 ++index)
             {
                 const char character = typeName[index];
 
@@ -1341,9 +1457,24 @@ namespace ForradiaLang
             return false;
         }
 
+        bool IsListType(std::string_view typeName)
+        {
+            return IsGenericType(typeName, "List");
+        }
+
+        bool IsSetType(std::string_view typeName)
+        {
+            return IsGenericType(typeName, "Set");
+        }
+
         std::string ListElementType(std::string_view typeName)
         {
             return std::string(typeName.substr(5, typeName.size() - 6));
+        }
+
+        std::string SetElementType(std::string_view typeName)
+        {
+            return std::string(typeName.substr(4, typeName.size() - 5));
         }
 
         bool IsNullable(std::string_view typeName)
@@ -1368,6 +1499,44 @@ namespace ForradiaLang
             return ListRef{id};
         }
 
+        SetRef MakeSet(ExecutionState &state, const std::string &elementType)
+        {
+            const int id = state.nextSetId++;
+            state.sets.insert({id, SetData{elementType, {}}});
+            return SetRef{id};
+        }
+
+        bool ValuesEqual(const Value &left, const Value &right)
+        {
+            if (std::holds_alternative<Null>(left) ||
+                std::holds_alternative<Null>(right))
+            {
+                return std::holds_alternative<Null>(left) &&
+                       std::holds_alternative<Null>(right);
+            }
+
+            if (const auto *leftText = std::get_if<std::string>(&left))
+            {
+                const auto *rightText = std::get_if<std::string>(&right);
+                return rightText != nullptr && *leftText == *rightText;
+            }
+
+            if (const auto *leftObject = std::get_if<Object>(&left))
+            {
+                const auto *rightObject = std::get_if<Object>(&right);
+                return rightObject != nullptr &&
+                       leftObject->id == rightObject->id;
+            }
+
+            if (const auto *leftNumber = std::get_if<double>(&left))
+            {
+                const auto *rightNumber = std::get_if<double>(&right);
+                return rightNumber != nullptr && *leftNumber == *rightNumber;
+            }
+
+            return false;
+        }
+
         void ExpectElement(ExecutionState &state, const Value &value,
                            std::string_view typeName)
         {
@@ -1384,7 +1553,8 @@ namespace ForradiaLang
             }
 
             if (effective == "Int" || effective == "Double" ||
-                effective == "Boolean")
+                effective == "Boolean" || effective == "Keys" ||
+                effective == "MouseButtons")
             {
                 if (!std::holds_alternative<double>(value))
                 {
@@ -1454,6 +1624,26 @@ namespace ForradiaLang
                 return;
             }
 
+            if (IsSetType(effective))
+            {
+                const auto *set = std::get_if<SetRef>(&value);
+
+                if (set == nullptr)
+                {
+                    throw std::runtime_error("Expected a set.");
+                }
+
+                const auto found = state.sets.find(set->id);
+
+                if (found == state.sets.end() ||
+                    found->second.elementType != SetElementType(effective))
+                {
+                    throw std::runtime_error("Expected a set.");
+                }
+
+                return;
+            }
+
             const auto *instance = std::get_if<Object>(&value);
 
             if (instance == nullptr ||
@@ -1475,6 +1665,77 @@ namespace ForradiaLang
 
             ExpectElement(state, element, found->second.elementType);
             found->second.elements.push_back(std::move(element));
+        }
+
+        void AddSetElement(ExecutionState &state, const SetRef &set,
+                           Value element)
+        {
+            const auto found = state.sets.find(set.id);
+
+            if (found == state.sets.end())
+            {
+                throw std::runtime_error("Expected a set.");
+            }
+
+            ExpectElement(state, element, found->second.elementType);
+
+            for (const auto &existing : found->second.elements)
+            {
+                if (ValuesEqual(existing, element))
+                {
+                    return;
+                }
+            }
+
+            found->second.elements.push_back(std::move(element));
+        }
+
+        void RemoveSetElement(ExecutionState &state, const SetRef &set,
+                              const Value &element)
+        {
+            const auto found = state.sets.find(set.id);
+
+            if (found == state.sets.end())
+            {
+                throw std::runtime_error("Expected a set.");
+            }
+
+            ExpectElement(state, element, found->second.elementType);
+
+            auto &elements = found->second.elements;
+
+            for (auto iterator = elements.begin(); iterator != elements.end();
+                 ++iterator)
+            {
+                if (ValuesEqual(*iterator, element))
+                {
+                    elements.erase(iterator);
+                    return;
+                }
+            }
+        }
+
+        bool SetContains(ExecutionState &state, const SetRef &set,
+                         const Value &element)
+        {
+            const auto found = state.sets.find(set.id);
+
+            if (found == state.sets.end())
+            {
+                throw std::runtime_error("Expected a set.");
+            }
+
+            ExpectElement(state, element, found->second.elementType);
+
+            for (const auto &existing : found->second.elements)
+            {
+                if (ValuesEqual(existing, element))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         Value DefaultField(ExecutionState &state, const std::string &typeName)
@@ -1513,6 +1774,16 @@ namespace ForradiaLang
             if (IsListType(typeName))
             {
                 return MakeList(state, ListElementType(typeName));
+            }
+
+            if (IsSetType(typeName))
+            {
+                return MakeSet(state, SetElementType(typeName));
+            }
+
+            if (typeName == "Keys" || typeName == "MouseButtons")
+            {
+                return 0.0;
             }
 
             if (!state.classes.contains(typeName))
@@ -1604,6 +1875,26 @@ namespace ForradiaLang
                     found->second.elementType != ListElementType(field.typeName))
                 {
                     throw std::runtime_error("Expected a list.");
+                }
+
+                return value;
+            }
+
+            if (IsSetType(field.typeName))
+            {
+                const auto *set = std::get_if<SetRef>(&value);
+
+                if (set == nullptr)
+                {
+                    throw std::runtime_error("Expected a set.");
+                }
+
+                const auto found = state.sets.find(set->id);
+
+                if (found == state.sets.end() ||
+                    found->second.elementType != SetElementType(field.typeName))
+                {
+                    throw std::runtime_error("Expected a set.");
                 }
 
                 return value;
@@ -1717,6 +2008,49 @@ namespace ForradiaLang
                     state.variables.erase(savedVariable.name);
                 }
             }
+        }
+
+        std::optional<Value>
+        CallGlobalFunction(ExecutionState &state,
+                           const FunctionDeclaration &function,
+                           const std::vector<Value> &arguments)
+        {
+            const std::string previousGroup = state.currentGroup;
+            const int previousObject = state.currentObjectId;
+            state.currentGroup.clear();
+            state.currentObjectId = 0;
+            std::vector<SavedVariable> saved;
+            std::optional<Value> result;
+
+            try
+            {
+                BindParameters(state, function, arguments, saved);
+                ExecuteBlock(state, function.body);
+
+                if (state.controlFlow == ControlFlow::Return)
+                {
+                    result = std::move(state.returnValue);
+                    state.controlFlow = ControlFlow::None;
+                    state.returnValue = Null{};
+
+                    if (!function.returnType.empty())
+                    {
+                        ExpectElement(state, *result, function.returnType);
+                    }
+                }
+            }
+            catch (...)
+            {
+                RestoreParameters(state, saved);
+                state.currentGroup = previousGroup;
+                state.currentObjectId = previousObject;
+                throw;
+            }
+
+            RestoreParameters(state, saved);
+            state.currentGroup = previousGroup;
+            state.currentObjectId = previousObject;
+            return result;
         }
 
         std::optional<Value> CallObjectMethod(
@@ -2156,8 +2490,29 @@ namespace ForradiaLang
             {
                 const auto &assignment =
                     static_cast<const AssignmentStatement &>(statement);
-                AssignTo(state, *assignment.target,
-                         Evaluate(state, *assignment.value));
+                Value value = Evaluate(state, *assignment.value);
+
+                if (assignment.compoundOperation != 0)
+                {
+                    const double left =
+                        AsNumber(Evaluate(state, *assignment.target));
+                    const double right = AsNumber(value);
+
+                    if (assignment.compoundOperation == '+')
+                    {
+                        value = left + right;
+                    }
+                    else if (assignment.compoundOperation == '-')
+                    {
+                        value = left - right;
+                    }
+                    else
+                    {
+                        throw std::runtime_error("Unknown operation.");
+                    }
+                }
+
+                AssignTo(state, *assignment.target, std::move(value));
                 return;
             }
             case StatementKind::For:
@@ -2369,6 +2724,30 @@ namespace ForradiaLang
                     return;
                 }
 
+                if (const auto *set = std::get_if<SetRef>(&receiver))
+                {
+                    if (method.arguments.size() != 1)
+                    {
+                        throw std::runtime_error("Expected one argument.");
+                    }
+
+                    if (method.methodName == "Add")
+                    {
+                        AddSetElement(state, *set,
+                                      Evaluate(state, *method.arguments[0]));
+                        return;
+                    }
+
+                    if (method.methodName == "Remove")
+                    {
+                        RemoveSetElement(state, *set,
+                                         Evaluate(state, *method.arguments[0]));
+                        return;
+                    }
+
+                    throw std::runtime_error("Unknown method.");
+                }
+
                 const auto *instance = std::get_if<Object>(&receiver);
 
                 if (instance == nullptr)
@@ -2570,9 +2949,11 @@ namespace ForradiaLang
                         &scene->draw,
                         &scene->onMouseDown,
                         &scene->onKeyDown,
+                        &scene->onKeyUp,
                         &scene->onEnter,
                         scene->onMouseDownParameter,
-                        scene->onKeyDownParameter};
+                        scene->onKeyDownParameter,
+                        scene->onKeyUpParameter};
                 }
             }
         }
@@ -2724,6 +3105,56 @@ namespace ForradiaLang
 
             std::cout.flush();
         }
+
+        void RunSceneKeyUp(ExecutionState &state, int key)
+        {
+            if (state.currentSceneType.empty())
+            {
+                return;
+            }
+
+            const auto found = state.sceneTypes.find(state.currentSceneType);
+
+            if (found == state.sceneTypes.end() ||
+                found->second.onKeyUp == nullptr)
+            {
+                return;
+            }
+
+            const std::string &parameter = found->second.onKeyUpParameter;
+            const bool hasParameter = !parameter.empty();
+            const bool hadVariable =
+                hasParameter && state.variables.contains(parameter);
+            Value previous;
+
+            if (hadVariable)
+            {
+                previous = state.variables[parameter];
+            }
+
+            if (hasParameter)
+            {
+                if (NameIsConstant(state, parameter))
+                {
+                    throw std::runtime_error("Cannot change a constant.");
+                }
+
+                state.variables[parameter] = static_cast<double>(key);
+            }
+
+            ExecuteBlock(state, *found->second.onKeyUp);
+
+            if (hadVariable)
+            {
+                state.variables[parameter] = previous;
+            }
+            else if (hasParameter)
+            {
+                state.variables.erase(parameter);
+            }
+
+            std::cout.flush();
+        }
     }
 
     void Interpreter::Execute(
@@ -2760,6 +3191,7 @@ namespace ForradiaLang
             [&state]() { RunSceneUpdate(state); },
             [&state]() { RunSceneDraw(state); },
             [&state](int button) { RunSceneMouseDown(state, button); },
-            [&state](int key) { RunSceneKeyDown(state, key); });
+            [&state](int key) { RunSceneKeyDown(state, key); },
+            [&state](int key) { RunSceneKeyUp(state, key); });
     }
 }

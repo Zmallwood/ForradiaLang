@@ -1,0 +1,42 @@
+' Copyright (c) 2026 Andreas Åkerberg
+' SPDX-License-Identifier: MIT
+
+Import Core.CoreGameObjects.Player
+Import Common.NumberUtilities
+
+Class KeyboardMovement
+    Set<Keys> pressedKeys
+
+    Fn Update
+        Int now = Now()
+
+        If now > gPlayer.ticksLastMovement + InvertSpeed(gPlayer.movementSpeed) Then
+            If pressedKeys.Contains(Keys.W) Then
+                gPlayer.MoveNorth
+            ElseIf pressedKeys.Contains(Keys.S) Then
+                gPlayer.MoveEast
+            ElseIf pressedKeys.Contains(Keys.A) Then
+                gPlayer.MoveSouth
+            ElseIf pressedKeys.Contains(Keys.Q) Then
+                gPlayer.MoveWest
+            End
+
+            If pressedKeys.Contains(Keys.W) Or _
+                pressedKeys.Contains(Keys.S) Or _
+                pressedKeys.Contains(Keys.A) Or _
+                pressedKeys.Contains(Keys.Q) Then
+                gPlayer.ticksLastMovement = now
+            End
+        End
+    End
+
+    Fn OnKeyDown(Keys key)
+        pressedKeys.Add key
+    End
+
+    Fn OnKeyUp(Keys key)
+        pressedKeys.Remove key
+    End
+End
+
+KeyboardMovement gKeyboardMovement

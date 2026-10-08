@@ -702,14 +702,35 @@ namespace ForradiaLang
             }
         }
 
+        bool IsAssignmentOperator(TokenTypes type)
+        {
+            return type == TokenTypes::Equals ||
+                   type == TokenTypes::PlusEquals ||
+                   type == TokenTypes::MinusEquals;
+        }
+
         std::unique_ptr<Statement> ParseAssignment(ParseState &state,
                                                    std::unique_ptr<Expression> target)
         {
-            Expect(state, TokenTypes::Equals, "Expected '='.");
+            if (AtEnd(state) || !IsAssignmentOperator(Peek(state).type))
+            {
+                throw std::runtime_error("Expected '='.");
+            }
 
+            const TokenTypes operation = Advance(state).type;
             auto statement = std::make_unique<AssignmentStatement>();
             statement->target = std::move(target);
             statement->value = ParseExpression(state);
+
+            if (operation == TokenTypes::PlusEquals)
+            {
+                statement->compoundOperation = '+';
+            }
+            else if (operation == TokenTypes::MinusEquals)
+            {
+                statement->compoundOperation = '-';
+            }
+
             return statement;
         }
 
@@ -717,7 +738,7 @@ namespace ForradiaLang
         {
             const std::string name = Advance(state).value;
 
-            if (!AtEnd(state) && Peek(state).type == TokenTypes::Equals)
+            if (!AtEnd(state) && IsAssignmentOperator(Peek(state).type))
             {
                 auto target = std::make_unique<VariableExpression>();
                 target->name = name;
@@ -758,7 +779,7 @@ namespace ForradiaLang
 
                     const bool isMember =
                         !AtEnd(state) &&
-                        (Peek(state).type == TokenTypes::Equals ||
+                        (IsAssignmentOperator(Peek(state).type) ||
                          Peek(state).type == TokenTypes::Dot ||
                          Peek(state).type == TokenTypes::LeftBracket);
 
@@ -783,7 +804,7 @@ namespace ForradiaLang
                     }
                 }
 
-                if (!AtEnd(state) && Peek(state).type == TokenTypes::Equals)
+                if (!AtEnd(state) && IsAssignmentOperator(Peek(state).type))
                 {
                     return ParseAssignment(state, std::move(receiver));
                 }
@@ -1070,7 +1091,8 @@ namespace ForradiaLang
                     break;
                 }
 
-                if (Peek(state).type == TokenTypes::Update)
+                if (Peek(state).type == TokenTypes::Identifier &&
+                    Peek(state).value == "Update")
                 {
                     Advance(state);
                     declaration->update = ParseBlock(state, false);
@@ -1087,7 +1109,8 @@ namespace ForradiaLang
                     continue;
                 }
 
-                if (Peek(state).type == TokenTypes::OnMouseDown)
+                if (Peek(state).type == TokenTypes::Identifier &&
+                    Peek(state).value == "OnMouseDown")
                 {
                     Advance(state);
 
@@ -1119,7 +1142,8 @@ namespace ForradiaLang
                     continue;
                 }
 
-                if (Peek(state).type == TokenTypes::OnKeyDown)
+                if (Peek(state).type == TokenTypes::Identifier &&
+                    Peek(state).value == "OnKeyDown")
                 {
                     Advance(state);
 
@@ -1151,7 +1175,41 @@ namespace ForradiaLang
                     continue;
                 }
 
-                if (Peek(state).type == TokenTypes::OnEnter)
+                if (Peek(state).type == TokenTypes::Identifier &&
+                    Peek(state).value == "OnKeyUp")
+                {
+                    Advance(state);
+
+                    if (!AtEnd(state) &&
+                        Peek(state).type == TokenTypes::LeftParen)
+                    {
+                        Advance(state);
+
+                        const std::string typeName =
+                            Expect(state, TokenTypes::Identifier,
+                                   "Expected a type.")
+                                .value;
+
+                        if (typeName != "Keys")
+                        {
+                            throw std::runtime_error("Unknown type.");
+                        }
+
+                        declaration->onKeyUpParameter =
+                            Expect(state, TokenTypes::Identifier,
+                                   "Expected a name.")
+                                .value;
+
+                        Expect(state, TokenTypes::RightParen, "Expected ')'.");
+                    }
+
+                    declaration->onKeyUp = ParseBlock(state, false);
+                    Expect(state, TokenTypes::End, "Expected 'End'.");
+                    continue;
+                }
+
+                if (Peek(state).type == TokenTypes::Identifier &&
+                    Peek(state).value == "OnEnter")
                 {
                     Advance(state);
                     declaration->onEnter = ParseBlock(state, false);

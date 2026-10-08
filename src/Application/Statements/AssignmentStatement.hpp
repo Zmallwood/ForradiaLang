@@ -14,5 +14,6 @@ namespace ForradiaLang
 
         std::unique_ptr<Expression> target;
         std::unique_ptr<Expression> value;
+        char compoundOperation{0};
     };
 }

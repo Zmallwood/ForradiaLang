@@ -5,11 +5,29 @@ Import Core.Configuration.GameProperties
 
 Class Player
     Point position
+    Int ticksLastMovement = 0
+    Double movementSpeed = 5.0
 
     New
         Size size = GameProperties.kWorldAreaSize
 
         position = Point(size.width / 2, size.height / 2)
+    End
+
+    Fn MoveNorth
+        position.y -= 1
+    End
+
+    Fn MoveEast
+        position.x += 1
+    End
+
+    Fn MoveSouth
+        position.y += 1
+    End
+
+    Fn MoveWest
+        position.x -= 1
     End
 End
 

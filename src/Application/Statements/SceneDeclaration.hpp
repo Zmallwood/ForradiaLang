@@ -18,6 +18,8 @@ namespace ForradiaLang
         std::string onMouseDownParameter;
         std::vector<std::unique_ptr<Statement>> onKeyDown;
         std::string onKeyDownParameter;
+        std::vector<std::unique_ptr<Statement>> onKeyUp;
+        std::string onKeyUpParameter;
         std::vector<std::unique_ptr<Statement>> onEnter;
     };
 }

@@ -137,26 +137,6 @@ namespace ForradiaLang
                 return TokenTypes::Scene;
             }
 
-            if (word == "Update")
-            {
-                return TokenTypes::Update;
-            }
-
-            if (word == "OnMouseDown")
-            {
-                return TokenTypes::OnMouseDown;
-            }
-
-            if (word == "OnKeyDown")
-            {
-                return TokenTypes::OnKeyDown;
-            }
-
-            if (word == "OnEnter")
-            {
-                return TokenTypes::OnEnter;
-            }
-
             return TokenTypes::Identifier;
         }
     }
@@ -325,6 +305,22 @@ namespace ForradiaLang
                 source[index + 1] == '=')
             {
                 tokens.push_back({TokenTypes::GreaterOrEqual, ">="});
+                index += 2;
+                continue;
+            }
+
+            if (character == '+' && index + 1 < source.size() &&
+                source[index + 1] == '=')
+            {
+                tokens.push_back({TokenTypes::PlusEquals, "+="});
+                index += 2;
+                continue;
+            }
+
+            if (character == '-' && index + 1 < source.size() &&
+                source[index + 1] == '=')
+            {
+                tokens.push_back({TokenTypes::MinusEquals, "-="});
                 index += 2;
                 continue;
             }

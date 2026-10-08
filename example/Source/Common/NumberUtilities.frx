@@ -1,0 +1,6 @@
+' Copyright (c) 2026 Andreas Åkerberg
+' SPDX-License-Identifier: MIT
+
+Fn InvertSpeed(Double speed) As Int
+    Return CInt(1000/speed)
+End

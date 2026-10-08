@@ -9,6 +9,8 @@ namespace ForradiaLang
         String,
         Plus,
         Minus,
+        PlusEquals,
+        MinusEquals,
         Star,
         Slash,
         Percent,
@@ -46,10 +48,6 @@ namespace ForradiaLang
         Const,
         New,
         Import,
-        Scene,
-        Update,
-        OnMouseDown,
-        OnKeyDown,
-        OnEnter
+        Scene
     };
 }
