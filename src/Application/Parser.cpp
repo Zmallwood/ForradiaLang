@@ -20,6 +20,7 @@
 #include "Statements/MethodCall.hpp"
 #include "Statements/ObjectStatement.hpp"
 #include "Statements/PrintStatement.hpp"
+#include "Statements/ReturnStatement.hpp"
 #include "Statements/SceneDeclaration.hpp"
 
 namespace ForradiaLang
@@ -109,6 +110,7 @@ namespace ForradiaLang
         ParseArguments(ParseState &state);
         std::string ParseTypeName(ParseState &state);
         std::unique_ptr<Statement> ParseIdentifierStatement(ParseState &state);
+        std::unique_ptr<Statement> ParseReturnStatement(ParseState &state);
         std::unique_ptr<Statement> ParseStatement(ParseState &state);
         std::unique_ptr<Statement> ParseConstStatement(ParseState &state);
         std::unique_ptr<Statement> ParseGroup(ParseState &state);
@@ -633,6 +635,9 @@ namespace ForradiaLang
                 Advance(state);
                 return std::make_unique<ContinueStatement>();
 
+            case TokenTypes::Return:
+                return ParseReturnStatement(state);
+
             case TokenTypes::Identifier:
                 return ParseIdentifierStatement(state);
 
@@ -831,6 +836,15 @@ namespace ForradiaLang
             return statement;
         }
 
+        std::unique_ptr<Statement> ParseReturnStatement(ParseState &state)
+        {
+            Expect(state, TokenTypes::Return, "Expected 'Return'.");
+
+            auto statement = std::make_unique<ReturnStatement>();
+            statement->value = ParseExpression(state);
+            return statement;
+        }
+
         std::unique_ptr<FunctionDeclaration> ParseFunction(ParseState &state)
         {
             Expect(state, TokenTypes::Fn, "Expected 'Fn'.");
@@ -840,6 +854,13 @@ namespace ForradiaLang
                 Expect(state, TokenTypes::Identifier, "Expected a name.").value;
 
             ParseOptionalParameters(state);
+
+            if (!AtEnd(state) && Peek(state).type == TokenTypes::Identifier &&
+                Peek(state).value == "As")
+            {
+                Advance(state);
+                function->returnType = ParseTypeName(state);
+            }
 
             function->body = ParseBlock(state, false);
 

@@ -37,6 +37,7 @@ namespace ForradiaLang
         To,
         Next,
         Continue,
+        Return,
         Fn,
         Class,
         Group,

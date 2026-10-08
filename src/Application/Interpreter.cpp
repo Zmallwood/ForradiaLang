@@ -1,6 +1,7 @@
 #include "Interpreter.hpp"
 
 #include <cmath>
+#include <optional>
 #include <unordered_set>
 
 #include "Coloring.hpp"
@@ -27,6 +28,7 @@
 #include "Statements/MethodCall.hpp"
 #include "Statements/ObjectStatement.hpp"
 #include "Statements/PrintStatement.hpp"
+#include "Statements/ReturnStatement.hpp"
 #include "Statements/SceneDeclaration.hpp"
 
 namespace ForradiaLang
@@ -388,8 +390,17 @@ namespace ForradiaLang
         {
         };
 
+        struct ReturnSignal
+        {
+            Value value;
+        };
+
         void ExecuteStatement(ExecutionState &state,
                               const Statement &statement);
+
+        std::optional<Value> CallObjectMethod(ExecutionState &state,
+                                              const Object &instance,
+                                              const std::string &methodName);
 
         Value EvaluateBinary(ExecutionState &state,
                              const BinaryExpression &expression)
@@ -665,23 +676,55 @@ namespace ForradiaLang
                 throw std::runtime_error("Unknown member.");
             }
 
+            if (const auto *list = std::get_if<ListRef>(&object))
+            {
+                if (expression.memberName != "Count")
+                {
+                    throw std::runtime_error("Unknown member.");
+                }
+
+                const auto found = state.lists.find(list->id);
+
+                if (found == state.lists.end())
+                {
+                    throw std::runtime_error("Expected a list.");
+                }
+
+                return static_cast<double>(found->second.elements.size());
+            }
+
             if (const auto *instance = std::get_if<Object>(&object))
             {
                 const auto fields = state.objectFields.find(instance->id);
 
-                if (fields == state.objectFields.end())
+                if (fields != state.objectFields.end())
+                {
+                    const auto field =
+                        fields->second.find(expression.memberName);
+
+                    if (field != fields->second.end())
+                    {
+                        return field->second;
+                    }
+                }
+
+                const auto classInfo = state.classes.find(instance->className);
+
+                if (classInfo == state.classes.end() ||
+                    !classInfo->second.methods.contains(expression.memberName))
                 {
                     throw std::runtime_error("Unknown member.");
                 }
 
-                const auto field = fields->second.find(expression.memberName);
+                const std::optional<Value> returned =
+                    CallObjectMethod(state, *instance, expression.memberName);
 
-                if (field == fields->second.end())
+                if (!returned.has_value())
                 {
-                    throw std::runtime_error("Unknown member.");
+                    throw std::runtime_error("Expected a value.");
                 }
 
-                return field->second;
+                return *returned;
             }
 
             throw std::runtime_error("Unknown member.");
@@ -1249,6 +1292,58 @@ namespace ForradiaLang
             }
         }
 
+        std::optional<Value> CallObjectMethod(ExecutionState &state,
+                                              const Object &instance,
+                                              const std::string &methodName)
+        {
+            const auto classInfo = state.classes.find(instance.className);
+
+            if (classInfo == state.classes.end())
+            {
+                throw std::runtime_error("Unknown class.");
+            }
+
+            const auto found = classInfo->second.methods.find(methodName);
+
+            if (found == classInfo->second.methods.end())
+            {
+                throw std::runtime_error("Unknown method.");
+            }
+
+            const FunctionDeclaration *function = found->second;
+            const int previousObject = state.currentObjectId;
+            const std::string previousGroup = state.currentGroup;
+            state.currentObjectId = instance.id;
+            state.currentGroup.clear();
+
+            try
+            {
+                ExecuteBlock(state, function->body);
+            }
+            catch (const ReturnSignal &returned)
+            {
+                state.currentObjectId = previousObject;
+                state.currentGroup = previousGroup;
+
+                if (!function->returnType.empty())
+                {
+                    ExpectElement(state, returned.value, function->returnType);
+                }
+
+                return returned.value;
+            }
+            catch (...)
+            {
+                state.currentObjectId = previousObject;
+                state.currentGroup = previousGroup;
+                throw;
+            }
+
+            state.currentObjectId = previousObject;
+            state.currentGroup = previousGroup;
+            return std::nullopt;
+        }
+
         struct Slot
         {
             Value *value{nullptr};
@@ -1638,6 +1733,12 @@ namespace ForradiaLang
                 throw ContinueSignal{};
             }
 
+            if (const auto *returned =
+                    dynamic_cast<const ReturnStatement *>(&statement))
+            {
+                throw ReturnSignal{Evaluate(state, *returned->value)};
+            }
+
             if (const auto *print =
                     dynamic_cast<const PrintStatement *>(&statement))
             {
@@ -1810,40 +1911,7 @@ namespace ForradiaLang
                     throw std::runtime_error("Expected an object.");
                 }
 
-                const auto classInfo = state.classes.find(instance->className);
-
-                if (classInfo == state.classes.end())
-                {
-                    throw std::runtime_error("Unknown class.");
-                }
-
-                const auto found =
-                    classInfo->second.methods.find(method->methodName);
-
-                if (found == classInfo->second.methods.end())
-                {
-                    throw std::runtime_error("Unknown method.");
-                }
-
-                const FunctionDeclaration *function = found->second;
-                const int previousObject = state.currentObjectId;
-                const std::string previousGroup = state.currentGroup;
-                state.currentObjectId = instance->id;
-                state.currentGroup.clear();
-
-                try
-                {
-                    ExecuteBlock(state, function->body);
-                }
-                catch (...)
-                {
-                    state.currentObjectId = previousObject;
-                    state.currentGroup = previousGroup;
-                    throw;
-                }
-
-                state.currentObjectId = previousObject;
-                state.currentGroup = previousGroup;
+                CallObjectMethod(state, *instance, method->methodName);
                 return;
             }
 
@@ -1929,6 +1997,18 @@ namespace ForradiaLang
                 try
                 {
                     ExecuteBlock(state, found->second->body);
+                }
+                catch (const ReturnSignal &returned)
+                {
+                    state.currentGroup = previousGroup;
+
+                    if (!found->second->returnType.empty())
+                    {
+                        ExpectElement(state, returned.value,
+                                      found->second->returnType);
+                    }
+
+                    return;
                 }
                 catch (...)
                 {
@@ -2165,6 +2245,10 @@ namespace ForradiaLang
                 [&state](int key) { RunSceneKeyDown(state, key); });
         }
         catch (const ContinueSignal &)
+        {
+            throw std::runtime_error("Unexpected statement.");
+        }
+        catch (const ReturnSignal &)
         {
             throw std::runtime_error("Unexpected statement.");
         }

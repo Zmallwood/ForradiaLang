@@ -1,0 +1,10 @@
+' Copyright (c) 2026 Andreas Åkerberg
+' SPDX-License-Identifier: MIT
+
+Import Core.WorldStructure.World
+
+Fn ClearWithGrass
+    WorldArea worldArea = gWorld.currentWorldArea
+
+    Size size = worldArea.GetSize
+End

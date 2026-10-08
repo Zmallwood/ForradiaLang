@@ -3,4 +3,5 @@
 
 Group GameProperties
     Const Size kWorldAreaSize = Size(100, 100)
+    Const Double kTileWidth = 0.05
 End

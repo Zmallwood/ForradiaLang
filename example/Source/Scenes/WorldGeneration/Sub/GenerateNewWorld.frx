@@ -1,6 +1,13 @@
 ' Copyright (c) 2026 Andreas Åkerberg
 ' SPDX-License-Identifier: MIT
 
+Import Sub.ClearWithGrass
+Import Sub.GenerateWater
+
 Fn GenerateNewWorld
     Print "Generating new world"
+
+    ClearWithGrass
+    
+    GenerateWater
 End

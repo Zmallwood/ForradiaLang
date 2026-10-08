@@ -92,6 +92,11 @@ namespace ForradiaLang
                 return TokenTypes::Continue;
             }
 
+            if (word == "Return")
+            {
+                return TokenTypes::Return;
+            }
+
             if (word == "Fn")
             {
                 return TokenTypes::Fn;

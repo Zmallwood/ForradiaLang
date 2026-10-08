@@ -3,11 +3,12 @@
 
 Import Core.WorldStructure.World
 Import Core.CoreGameObjects.Player
+Import Core.Configuration.GameProperties
 
 Class WorldView
     Fn Draw
-        Double tileWidth = 0.05
-        Double tileHeight = ConvertWidthToHeight(0.05)
+        Double tileWidth = GameProperties.kTileWidth
+        Double tileHeight = ConvertWidthToHeight(tileWidth)
 
         Point playerPosition = gPlayer.position
 
