@@ -539,21 +539,21 @@ namespace ForradiaLang
                 return IsTrue(Evaluate(state, *expression.right)) ? 1.0 : 0.0;
             }
 
-            if (expression.operation == '=')
+            if (expression.operation == '=' || expression.operation == 'N')
             {
                 const Value left = Evaluate(state, *expression.left);
                 const Value right = Evaluate(state, *expression.right);
+                double equal = 0.0;
 
                 if (std::holds_alternative<Null>(left) ||
                     std::holds_alternative<Null>(right))
                 {
-                    return std::holds_alternative<Null>(left) &&
-                                   std::holds_alternative<Null>(right)
-                               ? 1.0
-                               : 0.0;
+                    equal = std::holds_alternative<Null>(left) &&
+                                    std::holds_alternative<Null>(right)
+                                ? 1.0
+                                : 0.0;
                 }
-
-                if (const auto *leftText = std::get_if<std::string>(&left))
+                else if (const auto *leftText = std::get_if<std::string>(&left))
                 {
                     const auto *rightText = std::get_if<std::string>(&right);
 
@@ -562,10 +562,9 @@ namespace ForradiaLang
                         throw std::runtime_error("Expected a string.");
                     }
 
-                    return *leftText == *rightText ? 1.0 : 0.0;
+                    equal = *leftText == *rightText ? 1.0 : 0.0;
                 }
-
-                if (const auto *leftObject = std::get_if<Object>(&left))
+                else if (const auto *leftObject = std::get_if<Object>(&left))
                 {
                     const auto *rightObject = std::get_if<Object>(&right);
 
@@ -574,10 +573,19 @@ namespace ForradiaLang
                         throw std::runtime_error("Expected an object.");
                     }
 
-                    return leftObject->id == rightObject->id ? 1.0 : 0.0;
+                    equal = leftObject->id == rightObject->id ? 1.0 : 0.0;
+                }
+                else
+                {
+                    equal = AsNumber(left) == AsNumber(right) ? 1.0 : 0.0;
                 }
 
-                return AsNumber(left) == AsNumber(right) ? 1.0 : 0.0;
+                if (expression.operation == 'N')
+                {
+                    return equal == 0.0 ? 1.0 : 0.0;
+                }
+
+                return equal;
             }
 
             if (expression.operation == '+')
@@ -703,6 +711,23 @@ namespace ForradiaLang
                     AsNumber(Evaluate(state, *expression.arguments[0]));
 
                 return Graphics::ConvertWidthToHeight(width);
+            }
+
+            if (expression.name == "GetImageSize")
+            {
+                if (expression.arguments.size() != 1)
+                {
+                    throw std::runtime_error("Expected one argument.");
+                }
+
+                const Value nameValue =
+                    Evaluate(state, *expression.arguments[0]);
+                int width = 0;
+                int height = 0;
+                Graphics::GetImageSize(AsString(nameValue), width, height);
+
+                return Size{static_cast<double>(width),
+                            static_cast<double>(height)};
             }
 
             if (expression.name == "Point")

@@ -3,9 +3,12 @@
 
 Import Sub.ClearWithGrass
 Import Sub.GenerateWater
+Import Sub.GenerateObjects
 
 Fn GenerateNewWorld
     ClearWithGrass
 
     GenerateWater
+
+    GenerateObjects
 End

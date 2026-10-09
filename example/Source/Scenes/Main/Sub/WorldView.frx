@@ -50,7 +50,6 @@ Class WorldView
                 End
                 
                 If Not groundType == String.Empty Then
-
                     If groundType == "GroundWater" Then
                         Int animIndex = ((Now() + 10 * xCoordinate * yCoordinate) % 900) / 300
 
@@ -58,6 +57,19 @@ Class WorldView
                     End
 
                     DrawImage groundType, xPx, yPx, widthPx, heightPx
+                End
+
+                Object? object = tile.object
+
+                If object != Nothing Then
+                    Size imageSize = GetImageSize(object.type)
+
+                    Double imageWidthPx = imageSize.width/60.0 * widthPx
+                    Double imageHeightPx = imageSize.height/60.0 * heightPx
+                    Double imageXPx = xPx + widthPx/2 - imageWidthPx/2
+                    Double imageYPx = yPx + heightPx/2 - imageHeightPx
+
+                    DrawImage object.type, imageXPx, imageYPx, imageWidthPx, imageHeightPx
                 End
 
                 If x == (gridSize - 1)/2 And y == (gridSize - 1)/2 Then

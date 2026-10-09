@@ -1,0 +1,22 @@
+' Copyright (c) 2026 Andreas Åkerberg
+' SPDX-License-Identifier: MIT
+
+Import Core.WorldStructure.World
+
+Fn GenerateObjects
+    WorldArea worldArea = gWorld.currentWorldArea
+
+    Size size = worldArea.GetSize
+
+    Int numTree1s = RandomInt(140, 160)
+
+    For i = 1 To numTree1s
+        Int x = RandomInt(0, size.width - 1)
+        Int y = RandomInt(0, size.height - 1)
+
+        Tile? tile = worldArea.GetTile(x, y)
+
+        tile.object = Object()
+        tile.object.type = "ObjectTree1"
+    Next
+End

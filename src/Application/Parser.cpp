@@ -78,6 +78,7 @@ namespace ForradiaLang
         bool IsComparison(TokenTypes type)
         {
             return type == TokenTypes::Equals ||
+                   type == TokenTypes::NotEquals ||
                    type == TokenTypes::GreaterThan ||
                    type == TokenTypes::GreaterOrEqual ||
                    type == TokenTypes::LessThan;
@@ -390,6 +391,10 @@ namespace ForradiaLang
                 if (token.type == TokenTypes::GreaterOrEqual)
                 {
                     operation = 'G';
+                }
+                else if (token.type == TokenTypes::NotEquals)
+                {
+                    operation = 'N';
                 }
 
                 auto binary = std::make_unique<BinaryExpression>();

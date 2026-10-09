@@ -15,6 +15,7 @@ namespace ForradiaLang
         Slash,
         Percent,
         Equals,
+        NotEquals,
         GreaterThan,
         GreaterOrEqual,
         LessThan,

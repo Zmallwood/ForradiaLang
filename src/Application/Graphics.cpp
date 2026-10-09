@@ -1115,6 +1115,23 @@ namespace ForradiaLang
         }
     }
 
+    void Graphics::GetImageSize(std::string_view name, int &width, int &height)
+    {
+        if (renderer == nullptr)
+        {
+            throw std::runtime_error("Could not get image size.");
+        }
+
+        SDL_Texture *texture = ImageTexture(name);
+
+        if (SDL_QueryTexture(texture, nullptr, nullptr, &width, &height) !=
+                0 ||
+            width <= 0 || height <= 0)
+        {
+            throw std::runtime_error("Could not get image size.");
+        }
+    }
+
     double Graphics::ConvertWidthToHeight(double width)
     {
         if (renderer == nullptr)
