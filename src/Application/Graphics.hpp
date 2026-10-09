@@ -37,6 +37,8 @@ namespace ForradiaLang
 
         void GetImageSize(std::string_view name, int &width, int &height);
 
+        void GetMousePosition(double &x, double &y);
+
         double ConvertWidthToHeight(double width);
 
         void DrawString(std::string_view text, double x, double y,

@@ -3,10 +3,13 @@
 
 Import Sub.WorldView
 Import Sub.KeyboardMovement
+Import Sub.TileHovering
 
 Scene MainScene
     Update
         gKeyboardMovement.Update
+
+        gTileHovering.Update
     End
 
     OnKeyDown(Keys key)

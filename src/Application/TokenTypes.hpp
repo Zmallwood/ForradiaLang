@@ -19,6 +19,7 @@ namespace ForradiaLang
         GreaterThan,
         GreaterOrEqual,
         LessThan,
+        LessOrEqual,
         LeftParen,
         RightParen,
         LeftBracket,

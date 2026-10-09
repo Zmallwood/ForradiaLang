@@ -309,6 +309,14 @@ namespace ForradiaLang
                 continue;
             }
 
+            if (character == '<' && index + 1 < source.size() &&
+                source[index + 1] == '=')
+            {
+                tokens.push_back({TokenTypes::LessOrEqual, "<="});
+                index += 2;
+                continue;
+            }
+
             if (character == '!' && index + 1 < source.size() &&
                 source[index + 1] == '=')
             {

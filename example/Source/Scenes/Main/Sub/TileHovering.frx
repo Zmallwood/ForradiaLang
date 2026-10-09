@@ -1,0 +1,60 @@
+' Copyright (c) 2026 Andreas Åkerberg
+' SPDX-License-Identifier: MIT
+
+Import Core.WorldStructure.World
+Import Core.CoreGameObjects.Player
+Import Core.Configuration.GameProperties
+
+Class TileHovering
+    Point hoveredCoordinate = Point(-1, -1)
+
+    Fn Update
+        PointD mousePosition = GetMousePosition
+
+        Double tileWidth = GameProperties.kTileWidth
+        Double tileHeight = ConvertWidthToHeight(tileWidth)
+
+        Point playerPosition = gPlayer.position
+
+        WorldArea worldArea = gWorld.currentWorldArea
+
+        Const Double kSmallValue = 0.001
+
+        Const Int gridSize = GameProperties.kGridSize
+
+        For y = 0 To gridSize - 1
+            For x = 0 To gridSize - 1
+                Int xCoordinate = playerPosition.x - (gridSize - 1)/2 + x
+                Int yCoordinate = playerPosition.y - (gridSize - 1)/2 + y
+
+                If Not worldArea.IsValidCoordinate(xCoordinate, yCoordinate) Then
+                    Continue
+                End
+
+                Double xPx = 0.5 - tileWidth/2 + x*tileWidth/2 - y*tileWidth/2
+                Double yPx = 0.5 - gridSize/2.0*tileHeight + x*tileHeight/2 + y*tileHeight/2
+                Double widthPx = tileWidth + kSmallValue
+                Double heightPx = tileHeight + kSmallValue
+
+                If xPx + widthPx < 0.0 Or _
+                    yPx + heightPx < 0.0 Or _
+                    xPx > 1.0 Or _
+                    yPx > 1.0 Then
+                    Continue
+                End
+
+                Double centerX = xPx + widthPx / 2
+                Double centerY = yPx + heightPx / 2
+                
+                Double dx = Abs(mousePosition.x - centerX) / (widthPx / 2)
+                Double dy = Abs(mousePosition.y - centerY) / (heightPx / 2)
+
+                If dx + dy <= 1.0 Then
+                    hoveredCoordinate = Point(xCoordinate, yCoordinate)
+                End
+            Next
+        Next
+    End
+End
+
+TileHovering gTileHovering

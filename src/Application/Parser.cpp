@@ -81,7 +81,8 @@ namespace ForradiaLang
                    type == TokenTypes::NotEquals ||
                    type == TokenTypes::GreaterThan ||
                    type == TokenTypes::GreaterOrEqual ||
-                   type == TokenTypes::LessThan;
+                   type == TokenTypes::LessThan ||
+                   type == TokenTypes::LessOrEqual;
         }
 
         bool IsAddition(TokenTypes type)
@@ -391,6 +392,10 @@ namespace ForradiaLang
                 if (token.type == TokenTypes::GreaterOrEqual)
                 {
                     operation = 'G';
+                }
+                else if (token.type == TokenTypes::LessOrEqual)
+                {
+                    operation = 'L';
                 }
                 else if (token.type == TokenTypes::NotEquals)
                 {

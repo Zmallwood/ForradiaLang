@@ -405,6 +405,14 @@ namespace ForradiaLang
                 }
             }
 
+            if (name == "GetMousePosition")
+            {
+                double x = 0.0;
+                double y = 0.0;
+                Graphics::GetMousePosition(x, y);
+                return Point{x, y};
+            }
+
             throw std::runtime_error("Unknown variable.");
         }
 
@@ -417,6 +425,11 @@ namespace ForradiaLang
         void PopArguments(ExecutionState &state);
 
         Value EvaluateField(ExecutionState &state, const FieldInfo &field);
+
+        bool IsPointType(std::string_view typeName)
+        {
+            return typeName == "Point" || typeName == "PointD";
+        }
 
         bool IsListType(std::string_view typeName);
 
@@ -630,6 +643,9 @@ namespace ForradiaLang
             case '<':
                 return left < right ? 1.0 : 0.0;
 
+            case 'L':
+                return left <= right ? 1.0 : 0.0;
+
             case '%':
                 if (right == 0.0)
                 {
@@ -664,6 +680,17 @@ namespace ForradiaLang
                 }
 
                 return std::trunc(
+                    AsNumber(Evaluate(state, *expression.arguments[0])));
+            }
+
+            if (expression.name == "Abs")
+            {
+                if (expression.arguments.size() != 1)
+                {
+                    throw std::runtime_error("Expected one argument.");
+                }
+
+                return std::fabs(
                     AsNumber(Evaluate(state, *expression.arguments[0])));
             }
 
@@ -730,7 +757,20 @@ namespace ForradiaLang
                             static_cast<double>(height)};
             }
 
-            if (expression.name == "Point")
+            if (expression.name == "GetMousePosition")
+            {
+                if (!expression.arguments.empty())
+                {
+                    throw std::runtime_error("Expected zero arguments.");
+                }
+
+                double x = 0.0;
+                double y = 0.0;
+                Graphics::GetMousePosition(x, y);
+                return Point{x, y};
+            }
+
+            if (IsPointType(expression.name))
             {
                 return MakePoint(state, expression.arguments);
             }
@@ -1599,7 +1639,7 @@ namespace ForradiaLang
                 return;
             }
 
-            if (effective == "Point")
+            if (IsPointType(effective))
             {
                 if (!std::holds_alternative<Point>(value))
                 {
@@ -1781,7 +1821,7 @@ namespace ForradiaLang
                 return std::string{};
             }
 
-            if (typeName == "Point")
+            if (IsPointType(typeName))
             {
                 return Point{};
             }
@@ -1839,7 +1879,7 @@ namespace ForradiaLang
                 return value;
             }
 
-            if (field.typeName == "Point")
+            if (IsPointType(field.typeName))
             {
                 if (!std::holds_alternative<Point>(value))
                 {
@@ -2483,7 +2523,7 @@ namespace ForradiaLang
                     static_cast<const IntStatement &>(statement);
                 Value value = Evaluate(state, *declaration.value);
 
-                if (declaration.typeName == "Point" &&
+                if (IsPointType(declaration.typeName) &&
                     !std::holds_alternative<Point>(value))
                 {
                     throw std::runtime_error("Expected a point.");
@@ -2651,7 +2691,7 @@ namespace ForradiaLang
                     return;
                 }
 
-                if (object.typeName == "Point")
+                if (IsPointType(object.typeName))
                 {
                     DefineName(state, object.name,
                                MakePoint(state, object.arguments),

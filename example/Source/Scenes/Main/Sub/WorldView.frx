@@ -4,6 +4,7 @@
 Import Core.WorldStructure.World
 Import Core.CoreGameObjects.Player
 Import Core.Configuration.GameProperties
+Import TileHovering
 
 Class WorldView
     Fn Draw
@@ -57,6 +58,11 @@ Class WorldView
                     End
 
                     DrawImage groundType, xPx, yPx, widthPx, heightPx
+                End
+
+                If xCoordinate == gTileHovering.hoveredCoordinate.x And _
+                    yCoordinate == gTileHovering.hoveredCoordinate.y Then
+                    DrawImage "HoveredTile", xPx, yPx, widthPx, heightPx
                 End
 
                 Object? object = tile.object

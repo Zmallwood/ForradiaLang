@@ -1132,6 +1132,30 @@ namespace ForradiaLang
         }
     }
 
+    void Graphics::GetMousePosition(double &x, double &y)
+    {
+        if (window == nullptr)
+        {
+            throw std::runtime_error("Could not get mouse position.");
+        }
+
+        int mouseX = 0;
+        int mouseY = 0;
+        int windowWidth = 0;
+        int windowHeight = 0;
+
+        SDL_GetMouseState(&mouseX, &mouseY);
+        SDL_GetWindowSize(window, &windowWidth, &windowHeight);
+
+        if (windowWidth <= 0 || windowHeight <= 0)
+        {
+            throw std::runtime_error("Could not get mouse position.");
+        }
+
+        x = static_cast<double>(mouseX) / static_cast<double>(windowWidth);
+        y = static_cast<double>(mouseY) / static_cast<double>(windowHeight);
+    }
+
     double Graphics::ConvertWidthToHeight(double width)
     {
         if (renderer == nullptr)
