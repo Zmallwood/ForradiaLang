@@ -8,7 +8,7 @@ Fn GenerateObjects
 
     Size size = worldArea.GetSize
 
-    Int numTree1s = RandomInt(140, 160)
+    Int numTree1s = RandomInt(200, 240)
 
     For i = 1 To numTree1s
         Int x = RandomInt(0, size.width - 1)
@@ -16,7 +16,23 @@ Fn GenerateObjects
 
         Tile? tile = worldArea.GetTile(x, y)
 
-        tile.object = Object()
-        tile.object.type = "ObjectTree1"
+        If tile.groundType == "GroundGrass" Then
+            tile.object = Object()
+            tile.object.type = "ObjectTree1"
+        End
+    Next
+
+    Int numTree2s = RandomInt(200, 240)
+
+    For i = 1 To numTree2s
+        Int x = RandomInt(0, size.width - 1)
+        Int y = RandomInt(0, size.height - 1)
+
+        Tile? tile = worldArea.GetTile(x, y)
+
+        If tile.groundType == "GroundGrass" Then
+            tile.object = Object()
+            tile.object.type = "ObjectTree2"
+        End
     Next
 End
